@@ -1,0 +1,33 @@
+name: fetch football data
+
+on:
+  schedule:
+    - cron: "20 6 * * *"    # 08:20 Vienna in summer, 07:20 in winter
+    - cron: "20 13 * * *"   # 15:20 / 14:20 — catches same-day European prices
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fetch
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python fetch.py
+        env:
+          ODDS_KEY: ${{ secrets.ODDS_KEY }}
+      - name: commit
+        run: |
+          git config user.name "footquant fetch"
+          git config user.email "fetch@footquant.local"
+          git add data
+          if git diff --cached --quiet; then echo "no changes"; else git commit -m "data $(date -u +'%Y-%m-%d %H:%M')" && git push; fi
