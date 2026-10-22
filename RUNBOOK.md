@@ -20,14 +20,16 @@ Monday run = settle the weekend. All use `--mode both`. European fixtures within
 1. **Clone**: `GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://github.com/miguell2001-flj/footquant-data /home/claude/fq`
    (public; no credentials needed). Check `data/fetch.log` (last lines): if the newest `ok` lines are older
    than 36 hours, say so in the report and continue with the files as they are.
-2. **Bankroll**: ArtifactData `get` `settings/main` → `bankroll` (default 1000 if missing).
+2. **Settings**: ArtifactData `get` `settings/main` and save its `data` object as `/home/claude/fq_docs/settings.json`
+   (a python heredoc is fine). It holds Miguel's rules: `bankroll`, `edge_margin` (required edge, e.g. 0.02), `max_odds`
+   (odds cap or null) and `kelly` ("quarter" or "half"). Missing fields mean the defaults (1000, 0.01, none, quarter).
 3. **Export the record of bets**: ArtifactData `list` collection `bets` with `query.limit` 1000 and
    `out_dir` `/home/claude/fq_docs` (page with `query.cursor` while `next_cursor` is returned). The listing shows every
    document's `version`: write them to `/home/claude/fq_docs/versions.json` as `{"<doc_id>": <version>, ...,
    "meta/status": <version of meta/status from a get>}` (a small python heredoc is fine).
 4. **Run**: `pip install --break-system-packages numpy scipy pandas scikit-learn` if an import fails, then
-   `python3 /home/claude/fq/live_run.py --data /home/claude/fq/data --out /home/claude/fq_out --bankroll <bankroll>
-   --ledger-docs /home/claude/fq_docs --mode both`. The log says what happened (live sheet vs dry run, bets recorded,
+   `python3 /home/claude/fq/live_run.py --data /home/claude/fq/data --out /home/claude/fq_out
+   --settings /home/claude/fq_docs/settings.json --ledger-docs /home/claude/fq_docs --mode both`. The log says what happened (live sheet vs dry run, bets recorded,
    bets settled, European fixtures priced, stand-in vs bet365 prices).
 5. **Update the Desk**: `cat /home/claude/fq_out/dash/db_batch_1.json` (and `_2`, `_3` ... if present) and pass each
    file's content as `writes` to ArtifactData `batch` (`url` = the Desk). The entries carry `if_version` already

@@ -121,7 +121,21 @@ def main():
     ap.add_argument("--now", default=None, help="override 'now' (ISO) for the live/dry-run decision")
     ap.add_argument("--margin", type=float, default=0.01)
     ap.add_argument("--uefa-days", type=int, default=7, help="price European fixtures this many days ahead")
+    ap.add_argument("--max-odds", type=float, default=None, help="skip picks priced above this (no cap by default)")
+    ap.add_argument("--kelly", choices=["quarter", "half"], default="quarter")
+    ap.add_argument("--settings", default=None, help="JSON exported from the Desk's settings/main: bankroll, edge_margin, max_odds, kelly override the flags")
     args = ap.parse_args()
+    if args.settings and Path(args.settings).exists():
+        import json as _json
+        st_in = _json.load(open(args.settings))
+        if st_in.get("bankroll"):
+            args.bankroll = float(st_in["bankroll"])
+        if st_in.get("edge_margin") is not None:
+            args.margin = float(st_in["edge_margin"])
+        if st_in.get("max_odds"):
+            args.max_odds = float(st_in["max_odds"])
+        if st_in.get("kelly") in ("quarter", "half"):
+            args.kelly = st_in["kelly"]
     data, out = Path(args.data), Path(args.out)
     (out / "dash").mkdir(parents=True, exist_ok=True)
     now = pd.Timestamp(args.now) if args.now else pd.Timestamp.now()
@@ -156,7 +170,16 @@ def main():
 
     mcfg = ModelConfig(xg_weight=0.6, xi=0.003)
     vcfg = ValueConfig(edge_margin=args.margin, markets=frozenset({"1X2"}))
-    scfg = StakingConfig()
+    scfg = StakingConfig(kelly_mode=args.kelly)
+    log(f"rules: bankroll {args.bankroll:.0f}, required edge {args.margin:.1%}, odds cap {args.max_odds if args.max_odds else 'none'}, {args.kelly} Kelly", fh)
+
+    def cap_odds(df):
+        if args.max_odds and len(df):
+            n = int((df["odds"] > args.max_odds).sum())
+            if n:
+                log(f"  {n} pick(s) above the odds cap of {args.max_odds:.2f} dropped", fh)
+            return df[df["odds"] <= args.max_odds]
+        return df
 
     # --- pool weight and market test per league ------------------------------------------------
     weights, mt_rows, ratings_rows = {}, [], []
@@ -216,7 +239,7 @@ def main():
                 if len(lf) == 0:
                     continue
                 frames.append(make_bet_sheet(hist, lf, [s for s in snaps if s.match_id in set(lf.match_id)], weights[lg], args.bankroll, mcfg, vcfg, scfg, run_id=run_id))
-            sheet = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            sheet = cap_odds(pd.concat(frames, ignore_index=True)) if frames else pd.DataFrame()
             sheet_run = f"live sheet of {today}: {len(live)} fixtures priced"
             log(f"LIVE: {len(live)} upcoming fixtures in our leagues -> {len(sheet)} bets", fh)
         else:
@@ -227,7 +250,7 @@ def main():
                 last = part[part.date >= cut]
                 snaps = snapshots_from_frame(odds[odds.match_id.isin(last.match_id) & (~odds.is_closing)])
                 frames.append(make_bet_sheet(part[part.date < cut], last[["match_id", "date", "league", "home", "away"]], snaps, weights[lg], args.bankroll, mcfg, vcfg, scfg, as_of=cut, run_id=f"dryrun-{cut:%Y-%m-%d}"))
-            sheet = pd.concat(frames, ignore_index=True)
+            sheet = cap_odds(pd.concat(frames, ignore_index=True))
             sheet_run = "dry run on the last completed round (no upcoming fixtures in the fixtures file yet)"
             log(f"no upcoming fixtures for our leagues in fixtures.csv (it covers {fx.date.min():%d %b}-{fx.date.max():%d %b} / {len(fx)} rows) -> dry run on the last round: {len(sheet)} bets", fh)
         # European fixtures in the window, priced with bet365 when the odds files are there, else DraftKings (ESPN)
@@ -246,6 +269,7 @@ def main():
             snaps = snapshots_from_frame(pd.concat(keep, ignore_index=True), bookmaker=None) if keep else []
             u_sheet = make_bet_sheet(all_hist, u_live, snaps, UEFA_W, args.bankroll, mcfg, vcfg, scfg, run_id=f"uefa-{today}",
                                      models={lg: joint for lg in UEFA_LEAGUES})
+            u_sheet = cap_odds(u_sheet)
             sheet_pick = {r["match_id"]: (r["selection"], float(r["stake"]), float(r["ev"])) for r in u_sheet.to_dict("records")}
             # only bets priced by bet365 go into the ledger; stand-in prices make a watch list instead
             u_sheet = u_sheet[u_sheet.match_id.map(lambda m: price_source.get(m) == "bet365")]
@@ -421,7 +445,8 @@ def main():
                   "pool_weights": "; ".join(f"{SHORT.get(l, l)} {weights[l]:.3f}" for l in leagues) + (f"; Europe {UEFA_W:.3f} (set)" if len(u_hist) else ""),
                   "uefa_prices": ("bet365" if len(b365) else "stand-in (DraftKings via ESPN) until the Odds API key is in the download script") if len(u_hist) else "not loaded",
                   "fixtures_priced": int(len(live)), "fixtures_file_covers": f"{fx.date.min():%d %b} to {fx.date.max():%d %b}" if len(fx) else "no matches in our leagues",
-                  "sheet_run": sheet_run, "bankroll": args.bankroll, "kelly": scfg.kelly_mode, "n_settled": int(rep.get("n_settled", 0))}
+                  "sheet_run": sheet_run, "bankroll": args.bankroll, "kelly": scfg.kelly_mode, "edge_margin": args.margin, "max_odds": args.max_odds,
+                  "n_settled": int(rep.get("n_settled", 0))}
     json.dump(status_doc, open(out / "dash" / "status.json", "w"), indent=1)
     # Desk database write plan: one JSON file per document plus batch files (<= 50 writes each) for the ArtifactData tool.
     # New documents -> set; changed documents -> update (if_version filled from versions.json when given, else null).
