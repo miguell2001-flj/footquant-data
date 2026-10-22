@@ -24,6 +24,10 @@ Monday run = settle the weekend. All use `--mode both`. European fixtures within
 
 ## Steps
 
+0. **Refresh the data first** (football-data.co.uk posts the weekend's fixtures on Friday, so the scheduled fetch may be
+   stale): `gh api -X POST repos/<OWNER>/footquant-data/actions/workflows/fetch.yml/dispatches -f ref=main`, then poll
+   `gh api "repos/<OWNER>/footquant-data/actions/runs?per_page=1" --jq '.workflow_runs[0].status'` every 20 s until it
+   says `completed` (about 2 minutes). If `gh` is unavailable or the dispatch fails, say so in the report and go on.
 1. **Clone**: `GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://github.com/miguell2001-flj/footquant-data /home/claude/fq`
    (public; no credentials needed). Check `data/fetch.log` (last lines): if the newest `ok` lines are older
    than 36 hours, say so in the report and continue with the files as they are.
