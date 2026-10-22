@@ -17,8 +17,8 @@ Monday run = settle the weekend. All use `--mode both`. European fixtures within
 
 ## Steps
 
-1. **Clone**: `GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://github.com/<OWNER>/footquant-data /home/claude/fq`
-   (the owner is in the scheduled task's prompt). Check `data/fetch.log` (last lines): if the newest `ok` lines are older
+1. **Clone**: `GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://github.com/miguell2001-flj/footquant-data /home/claude/fq`
+   (public; no credentials needed). Check `data/fetch.log` (last lines): if the newest `ok` lines are older
    than 36 hours, say so in the report and continue with the files as they are.
 2. **Bankroll**: ArtifactData `get` `settings/main` → `bankroll` (default 1000 if missing).
 3. **Export the record of bets**: ArtifactData `list` collection `bets` with `query.limit` 1000 and
