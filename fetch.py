@@ -4,6 +4,8 @@ Writes into data/:
   E0_2627.csv, SP1_2627.csv, I1_2627.csv, D1_2627.csv, F1_2627.csv, fixtures.csv   football-data.co.uk (results, bet365 prices, xG)
   uefa_espn.csv                                                                     Champions / Europa / Conference League results,
                                                                                     goal timelines and fixtures (ESPN scoreboard)
+  domestic_espn.csv                                                                 the five leagues' results and goal timelines
+                                                                                    (ESPN scoreboard) for the early-payout check
   odds_<sport>.json                                                                 bet365 prices for the European fixtures
                                                                                     (The Odds API; only when the ODDS_KEY secret is set
                                                                                     and a European match is within the next 4 days)
@@ -75,6 +77,20 @@ def months(first: dt.date, last: dt.date) -> list[str]:
     return out
 
 
+def months_all(first: dt.date, last: dt.date) -> list[str]:
+    out, y, m = [], first.year, first.month
+    while (y, m) <= (last.year, last.month):
+        out.append(f"{y}{m:02d}")
+        m += 1
+        if m == 13:
+            y, m = y + 1, 1
+    return out
+
+
+# the five domestic leagues: results and goal timelines only (prices come from football-data.co.uk)
+DOMESTIC = [("eng.1", "E0"), ("esp.1", "SP1"), ("ita.1", "I1"), ("ger.1", "D1"), ("fra.1", "F1")]
+
+
 def max_leads(details: list, home_id: str, hs: int, as_: int):
     goals = sorted(
         ({"clk": (d.get("clock") or {}).get("value", 0), "team": str((d.get("team") or {}).get("id", "")), "og": bool(d.get("ownGoal"))}
@@ -101,10 +117,10 @@ def max_leads(details: list, home_id: str, hs: int, as_: int):
     return "", "", 0
 
 
-def fetch_espn(first: dt.date, last: dt.date) -> list[dict]:
+def fetch_espn(first: dt.date, last: dt.date, comps: list[tuple[str, str]] | None = None, skip_summer: bool = True) -> list[dict]:
     rows = []
-    for lg, code in COMPS:
-        for m in months(first, last):
+    for lg, code in (comps or COMPS):
+        for m in months(first, last) if skip_summer else months_all(first, last):
             r = get(f"https://site.api.espn.com/apis/site/v2/sports/soccer/{lg}/scoreboard", params={"dates": m, "limit": 300})
             if r is None:
                 continue
@@ -140,17 +156,17 @@ def fetch_espn(first: dt.date, last: dt.date) -> list[dict]:
     return rows
 
 
-def write_espn(rows: list[dict]) -> None:
+def write_espn(rows: list[dict], name: str = "uefa_espn.csv", minimum: int = 500) -> None:
     cols = ["comp", "season", "event_id", "date_utc", "status", "neutral", "home_id", "home", "away_id", "away", "hs", "as",
             "home_max_lead", "away_max_lead", "timeline_ok", "odds_provider", "ml_h", "ml_d", "ml_a"]
-    if len(rows) < 500:  # a broken fetch must not wipe the file
-        log(f"KEPT    uefa_espn.csv (only {len(rows)} events fetched)")
+    if len(rows) < minimum:  # a broken fetch must not wipe the file
+        log(f"KEPT    {name} (only {len(rows)} events fetched)")
         return
-    with open(OUT / "uefa_espn.csv", "w", newline="", encoding="utf-8") as f:
+    with open(OUT / name, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols, quoting=csv.QUOTE_ALL)
         w.writeheader()
         w.writerows(rows)
-    log(f"ok      uefa_espn.csv  {len(rows)} events")
+    log(f"ok      {name}  {len(rows)} events")
 
 
 # ---------------------------------------------------------------- The Odds API (bet365 prices for Europe)
@@ -188,6 +204,8 @@ def main() -> None:
     fetch_football_data(season)
     rows = fetch_espn(dt.date(2024, 9, 1), today + dt.timedelta(days=75))
     write_espn(rows)
+    # domestic goal timelines (who led by two, and when) for the early-payout check of the model: 2024-25 to date
+    write_espn(fetch_espn(dt.date(2024, 8, 1), today, DOMESTIC, skip_summer=False), "domestic_espn.csv", minimum=1500)
     key = os.environ.get("ODDS_KEY", "").strip()
     if key:
         fetch_odds(key, rows)
