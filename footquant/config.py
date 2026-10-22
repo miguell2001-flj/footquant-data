@@ -116,12 +116,35 @@ class ValueConfig:
     early_payout_model: str = "score_effects"
     """'score_effects' (time- and score-dependent goal intensities fitted on the
     big-5 leagues, the default) or 'poisson' (constant rates)."""
-    early_payout_scale: float = 1.0
-    """Multiplier on the simulated increment. The independent-Poisson path model
-    under-predicts "led by two, did not win" by ~0-30% across the big-5 leagues
-    (2016-25: home 1.3-1.8% simulated vs 1.3-2.0% realised, away 1.4-1.9% vs
-    1.6-2.3%), because trailing teams push and leaders sit back. 1.0 is the
-    conservative default; ~1.15 matches the realised rates."""
+    early_payout_scale: float = 1.5
+    """Multiplier on the simulated increment for a side the market rates at 50%
+    or less. The path model under-predicts "led by two, did not win" because
+    trailing teams push and leaders sit back: on the big-5 goal timelines of
+    2025-26 and 2026-27 (3,900 team-matches, ESPN) the realised rate was
+    2.4% +- 0.25 against 1.5% simulated for sides priced under 60%, and
+    0.9% against 1.1% for sides priced at 70% or more. The scale falls
+    linearly from `early_payout_scale` at 50% to `early_payout_scale_favourite`
+    at 70% (see `early_payout_multiplier`). 1.0 / 1.0 restores the raw simulation."""
+    early_payout_scale_favourite: float = 0.9
+    """Multiplier for a side the market rates at 70% or more (see above)."""
+    edge_metric: str = "ev"
+    """What `edge_margin` is measured on when a bet sheet is made:
+    'ev'     - the expected return per unit staked at the price on offer,
+               p_paid * odds - 1 (the value after the bookmaker's margin);
+    'points' - p_paid - p_fair, the paid-out probability's lead over the
+               de-vigged market in probability points (ignores the price, so
+               with a pooled probability close to the market it is met by
+               almost any early-payout increment)."""
+
+    def early_payout_multiplier(self, p_market: float) -> float:
+        """Calibration multiplier on the simulated early-payout increment for a side the market rates at `p_market`."""
+        lo, hi = 0.5, 0.7
+        if p_market <= lo:
+            return self.early_payout_scale
+        if p_market >= hi:
+            return self.early_payout_scale_favourite
+        t = (p_market - lo) / (hi - lo)
+        return self.early_payout_scale + t * (self.early_payout_scale_favourite - self.early_payout_scale)
     early_payout_competitions: frozenset[str] = DEFAULT_EARLY_PAYOUT_COMPETITIONS
     n_sims: int = 200_000
     """Monte-Carlo paths used to estimate the probability a team leads by
@@ -137,6 +160,8 @@ class ValueConfig:
             raise ValueError("market_shrink must be in [0, 1)")
         if self.early_payout_model not in {"poisson", "score_effects"}:
             raise ValueError("early_payout_model must be 'poisson' or 'score_effects'")
+        if self.edge_metric not in {"ev", "points"}:
+            raise ValueError("edge_metric must be 'ev' or 'points'")
 
 
 @dataclass(frozen=True)

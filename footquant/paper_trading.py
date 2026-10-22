@@ -7,8 +7,11 @@ This is the production path that the EPL backtests point to:
   2. The Dixon-Coles xG model supplies (lambda_m, mu_m). Both enter a log-linear
      pool with weight w on the model (fit w on history with
      `fit_pool_weight_on_history`; ~0.2 on EPL 2016-21).
-  3. The early-payout increment is simulated from the pooled rates and added to
-     the pooled win probability; that is the probability the cash-flow depends on.
+  3. The early-payout increment is simulated from the pooled rates, calibrated
+     to the realised "led by two, did not win" rates (ValueConfig.early_payout_scale)
+     and added to the pooled win probability; that is the probability the
+     cash-flow depends on. A bet needs an expected return of `edge_margin`
+     per unit staked at the price on offer (edge_metric 'ev').
   4. Kelly (quarter) is sized on the pooled probability, so stakes track the
      1-2 % real expectation instead of the model's raw disagreement with the line.
 
@@ -120,7 +123,7 @@ def make_bet_sheet(
     by the UEFA competitions); when given, nothing is refitted from `history`.
     """
     model_cfg = model_cfg or ModelConfig(xg_weight=0.6, xi=0.003)
-    value_cfg = value_cfg or ValueConfig(edge_margin=0.01)
+    value_cfg = value_cfg or ValueConfig(edge_margin=0.02)
     staking_cfg = staking_cfg or StakingConfig()
     hist = validate_matches(history)
     as_of = pd.Timestamp(as_of) if as_of is not None else hist["date"].max()
@@ -152,11 +155,12 @@ def make_bet_sheet(
         best = None
         for j, sel in enumerate(("home", "draw", "away")):
             o = snaps["1X2"].prices[sel]
-            bonus = float(f["bonus"][j]) * value_cfg.early_payout_scale if eligible else 0.0
+            bonus = float(f["bonus"][j]) * value_cfg.early_payout_multiplier(float(f["p_market"][j])) if eligible else 0.0
             p_paid = min(float(f["p_pool"][j]) + bonus, 1.0)
             edge = p_paid - float(f["p_market"][j])
             ev = p_paid * o - 1.0
-            if edge >= value_cfg.edge_margin and ev > 0 and (best is None or ev > best["ev"]):
+            clears = ev >= value_cfg.edge_margin if value_cfg.edge_metric == "ev" else edge >= value_cfg.edge_margin
+            if clears and ev > 0 and (best is None or ev > best["ev"]):
                 k = kelly_fraction(p_paid, o)
                 stake = min(k * staking_cfg.kelly_fraction, staking_cfg.max_stake_frac) * bankroll
                 if staking_cfg.round_to > 0:
@@ -231,7 +235,10 @@ class Ledger:
             closing = closing_odds[(closing_odds["market"] == "1X2") & (closing_odds["is_closing"].astype(bool))].pivot_table(
                 index="match_id", columns="selection", values="odds")
         n = 0
-        for i, b in self.df[~self.df["settled"].astype(bool)].iterrows():
+        settled = self.df["settled"].astype(bool)
+        unverified = self.df["ep_unverified"].astype(bool) if "ep_unverified" in self.df.columns else pd.Series(False, index=self.df.index)
+        for i, b in self.df[(~settled) | (settled & unverified)].iterrows():
+            recheck = bool(settled.loc[i])  # settled on a half-time proxy: redo it only if the goal timeline is now known
             k = (pd.Timestamp(b["date"]).normalize(), b["home"], b["away"])
             r = res[res["match_id"] == b["match_id"]] if "match_id" in res.columns and (res["match_id"] == b["match_id"]).any() else None
             if r is None or len(r) == 0:
@@ -243,6 +250,10 @@ class Ledger:
                 continue
             hg, ag = int(r["home_goals"]), int(r["away_goals"])
             sel = b["selection"]
+            if recheck:
+                ml_known = r.get(f"{sel}_max_lead")
+                if ml_known is None or pd.isna(ml_known):
+                    continue
             won = {"home": hg > ag, "draw": hg == ag, "away": ag > hg}[sel]
             unverified = False
             if sel in ("home", "away") and b["ep_bonus"] > 0 and not won:

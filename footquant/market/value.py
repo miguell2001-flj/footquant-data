@@ -103,7 +103,7 @@ def evaluate_snapshot(
         p_win = float(probs[_MODEL_KEY[(snapshot.market, sel)]])
         bonus = 0.0
         if eligible and sel in ("home", "away"):
-            bonus = float(early_payout[f"p_{sel}_bonus"]) * cfg.early_payout_scale
+            bonus = float(early_payout[f"p_{sel}_bonus"]) * cfg.early_payout_multiplier(float(pf))
         p_paid = min(p_win + bonus, 1.0)
         if cfg.market_shrink > 0:  # blend toward the market's own fair price
             p_paid = (1.0 - cfg.market_shrink) * p_paid + cfg.market_shrink * (float(pf) + bonus)

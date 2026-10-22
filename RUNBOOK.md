@@ -12,6 +12,13 @@ Everything runs in the cloud. Nothing needs Miguel's PC.
 - **Drive folder** `footquant` (Google Drive connector, folder id `1DTJnbFDnXxgq1gJk1chs7Q9fB3eApmKp`): a copy of the
   run outputs for Miguel to look at. Optional; never read from it.
 
+Rules (from `settings/main`, set on the Desk): `edge_margin` is the required expected return per euro staked at the
+price on offer (0.02 = 2%, the paid-out probability times the price minus one); `max_odds` the price cap (2.5 by
+default since 22 Oct 2026); `kelly` quarter/half. The early-payout increment is calibrated to the realised
+"led by two, did not win" rates (ValueConfig.early_payout_scale); `data/domestic_espn.csv` carries the goal
+timelines, so domestic early payouts settle exactly. `underdog_check.py` + `underdog_report.py` reproduce the
+22 Oct 2026 analysis (walk-forward pricing of the whole history by odds band).
+
 Tuesday run = bet sheet for the midweek round (Tue-Thu). Friday run = settle midweek, bet sheet for the weekend.
 Monday run = settle the weekend. All use `--mode both`. European fixtures within 7 days are priced on every run.
 

@@ -36,6 +36,7 @@ from footquant.paper_trading import Ledger, make_bet_sheet, pooled_fixture  # no
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from uefa_data import COMP, OTHER_LEAGUE, load_espn, load_odds_api, team_leagues  # noqa: E402
+from domestic_data import attach_timelines  # noqa: E402
 
 SHORT = {"ENG-Premier League": "Premier League", "ESP-La Liga": "La Liga", "ITA-Serie A": "Serie A", "GER-Bundesliga": "Bundesliga", "FRA-Ligue 1": "Ligue 1",
          "UEFA-Champions League": "Champions League", "UEFA-Europa League": "Europa League", "UEFA-Conference League": "Conference League", OTHER_LEAGUE: "Europe (other clubs)"}
@@ -119,7 +120,7 @@ def main():
     ap.add_argument("--bankroll", type=float, default=1000.0)
     ap.add_argument("--mode", choices=["sheet", "settle", "both"], default="both")
     ap.add_argument("--now", default=None, help="override 'now' (ISO) for the live/dry-run decision")
-    ap.add_argument("--margin", type=float, default=0.01)
+    ap.add_argument("--margin", type=float, default=0.02, help="required expected return per euro staked at the price on offer (0.02 = 2%%)")
     ap.add_argument("--uefa-days", type=int, default=7, help="price European fixtures this many days ahead")
     ap.add_argument("--max-odds", type=float, default=None, help="skip picks priced above this (no cap by default)")
     ap.add_argument("--kelly", choices=["quarter", "half"], default="quarter")
@@ -143,6 +144,9 @@ def main():
     fh = open(out / f"run_{today}.log", "w")
 
     hist, odds = load_history(data)
+    if (data / "domestic_espn.csv").exists():
+        hist, n_tl = attach_timelines(data, hist)
+        log(f"goal timelines (ESPN) for {n_tl} of {len(hist)} domestic matches -> early payouts settle on the real goal sequence", fh)
     leagues = sorted(hist["league"].unique())
     log(f"run {now:%Y-%m-%d %H:%M} | {len(hist)} matches in {len(leagues)} leagues: " + ", ".join(f"{SHORT.get(l, l)} {int((hist.league == l).sum())}" for l in leagues), fh)
     log(f"xG available for {int(hist.home_xg.notna().sum())} matches (current-season files only)", fh)
@@ -171,7 +175,7 @@ def main():
     mcfg = ModelConfig(xg_weight=0.6, xi=0.003)
     vcfg = ValueConfig(edge_margin=args.margin, markets=frozenset({"1X2"}))
     scfg = StakingConfig(kelly_mode=args.kelly)
-    log(f"rules: bankroll {args.bankroll:.0f}, required edge {args.margin:.1%}, odds cap {args.max_odds if args.max_odds else 'none'}, {args.kelly} Kelly", fh)
+    log(f"rules: bankroll {args.bankroll:.0f}, required value {args.margin:.1%} per euro staked, odds cap {args.max_odds if args.max_odds else 'none'}, {args.kelly} Kelly; early payout x{vcfg.early_payout_scale:.2f} (underdogs) to x{vcfg.early_payout_scale_favourite:.2f} (favourites) of the simulated rate", fh)
 
     def cap_odds(df):
         if args.max_odds and len(df):
@@ -289,9 +293,9 @@ def main():
                 best = None
                 pick = sheet_pick.get(rec["match_id"])
                 for j, sel in enumerate(("home", "draw", "away")):
-                    bonus = float(f["bonus"][j]) * vcfg.early_payout_scale
+                    bonus = float(f["bonus"][j]) * vcfg.early_payout_multiplier(float(f["p_market"][j]))
                     p_paid = min(float(f["p_pool"][j]) + bonus, 1.0)
-                    min_odds = float(np.ceil(100.0 / round(p_paid, 4)) / 100.0)
+                    min_odds = float(np.ceil(100.0 * (1.0 + args.margin) / round(p_paid, 4)) / 100.0)  # the price that returns the required value
                     cur = float(sn.prices[sel])
                     cand_row = {"match_id": rec["match_id"], "date": rec["date"], "league": rec["league"], "home": rec["home"], "away": rec["away"],
                                 "selection": sel, "p_paid": p_paid, "p_market": float(f["p_market"][j]), "ep_bonus": bonus, "min_odds": min_odds,
@@ -396,7 +400,7 @@ def main():
                 x = res_all.loc[r["match_id"]]
                 hg, ag = int(x.home_goals), int(x.away_goals)
             src = sources.get(r["match_id"], "bet365")
-            min_odds = round(float(np.ceil(100.0 / round(float(r["p_paid"]), 4)) / 100.0), 2) if float(r.get("p_paid") or 0) > 0 else None
+            min_odds = round(float(np.ceil(100.0 * (1.0 + args.margin) / round(float(r["p_paid"]), 4)) / 100.0), 2) if float(r.get("p_paid") or 0) > 0 else None
             status = "won" if r.get("won") == 1.0 else "lost" if r.get("won") == 0.0 else "open"
             nat = None
             if hg is not None:
@@ -435,7 +439,7 @@ def main():
             "odds": round(r["odds"], 2), "stake": round(r["stake"], 2), "edge": round(r["edge"], 4), "ev": (round(r["ev"], 4) if r["ev"] is not None else None),
             "ep_bonus": round(r["ep_bonus"], 4), "p_paid": round(r["p_paid"], 4),
             "min_odds": r["min_odds"], "price_source": r["source"], "status": "watch",
-            "note": ("model and market agree: nothing to take at any price" if r["edge"] < args.margin else (f"value at {r['source']}'s {r['odds']:.2f}" if r["stake"] > 0 else f"{r['source']} shows {r['odds']:.2f}") + f"; take it only if bet365 pays at least {r['min_odds']:.2f}") + (" · bet365 pays early if they lead by 2" if r["ep_bonus"] > 0 else ""),
+            "note": ((f"value at {r['source']}'s {r['odds']:.2f}" if r["stake"] > 0 else f"{r['source']} shows {r['odds']:.2f}") + f"; take it only if bet365 pays at least {r['min_odds']:.2f}") + (" · bet365 pays early if they lead by 2" if r["ep_bonus"] > 0 else ""),
             "score": "", "pnl": None, "early_payout": "", "closing_odds": None, "clv": None,
         })
     json.dump(docs, open(out / "dash" / "bets.json", "w"), indent=1)
@@ -445,7 +449,7 @@ def main():
                   "pool_weights": "; ".join(f"{SHORT.get(l, l)} {weights[l]:.3f}" for l in leagues) + (f"; Europe {UEFA_W:.3f} (set)" if len(u_hist) else ""),
                   "uefa_prices": ("bet365" if len(b365) else "stand-in (DraftKings via ESPN) until the Odds API key is in the download script") if len(u_hist) else "not loaded",
                   "fixtures_priced": int(len(live)), "fixtures_file_covers": f"{fx.date.min():%d %b} to {fx.date.max():%d %b}" if len(fx) else "no matches in our leagues",
-                  "sheet_run": sheet_run, "bankroll": args.bankroll, "kelly": scfg.kelly_mode, "edge_margin": args.margin, "max_odds": args.max_odds,
+                  "sheet_run": sheet_run, "bankroll": args.bankroll, "kelly": scfg.kelly_mode, "edge_margin": args.margin, "edge_metric": "ev", "max_odds": args.max_odds, "ep_scale": [vcfg.early_payout_scale, vcfg.early_payout_scale_favourite],
                   "n_settled": int(rep.get("n_settled", 0))}
     json.dump(status_doc, open(out / "dash" / "status.json", "w"), indent=1)
     # Desk database write plan: one JSON file per document plus batch files (<= 50 writes each) for the ArtifactData tool.

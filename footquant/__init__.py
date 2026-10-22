@@ -16,7 +16,7 @@ from .config import BacktestConfig, EloConfig, ModelConfig, StakingConfig, Value
 from .paper_trading import Ledger, fit_pool_weight_on_history, make_bet_sheet
 from .pipeline import BettingPipeline
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "BacktestConfig",
