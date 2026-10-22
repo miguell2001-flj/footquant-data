@@ -55,10 +55,51 @@ def american_to_decimal(a) -> float:
     return 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
 
 
+# The Odds API spelling -> our canonical name (ESPN spelling, or football-data spelling for the big-5 clubs)
+ODDS_API_ALIASES = {
+    "FC Kairat": "Kairat Almaty", "FC Copenhagen": "F.C. København", "Hearts": "Heart of Midlothian", "Ajax": "Ajax Amsterdam",
+    "AGF Aarhus": "AGF", "Omonoia FC": "Omonia Nicosia", "Universitatea Craiova": "CSU Craiova", "Lincoln Red Imps FC": "Lincoln Red Imps",
+    "FC Twente Enschede": "FC Twente", "Sporting Lisbon": "Sporting CP", "Paris Saint Germain": "Paris SG", "Inter Club d'Escaldes": "Inter D'Escaldes",
+    "Olympiakos Piraeus": "Olympiacos", "Salzburg": "RB Salzburg", "Gent": "KAA Gent", "Sint Truiden": "Sint-Truidense", "FC Nordsjaelland": "FC Nordsjælland",
+    "Union Saint-Gilloise": "Union St.-Gilloise", "Hapoel Be'er Sheva": "Hapoel Be'er", "Brighton and Hove Albion": "Brighton", "Manchester United": "Man United",
+    "Manchester City": "Man City", "Tottenham Hotspur": "Tottenham", "Newcastle United": "Newcastle", "Nottingham Forest": "Nott'm Forest",
+    "Atletico Madrid": "Ath Madrid", "Athletic Bilbao": "Ath Bilbao", "Real Betis": "Betis", "Real Sociedad": "Sociedad", "Celta Vigo": "Celta",
+    "Bayer Leverkusen": "Leverkusen", "Borussia Dortmund": "Dortmund", "Eintracht Frankfurt": "Ein Frankfurt", "AC Milan": "Milan", "Inter Milan": "Inter",
+    "AS Roma": "Roma", "FC Porto": "FC Porto", "Sporting CP": "Sporting CP", "Club Brugge KV": "Club Brugge", "PSV Eindhoven": "PSV Eindhoven",
+    "Feyenoord": "Feyenoord Rotterdam", "Galatasaray": "Galatasaray", "Fenerbahce": "Fenerbahce", "Slavia Prague": "Slavia Prague", "Bodo/Glimt": "Bodo/Glimt",
+    "FK Bodo Glimt": "Bodo/Glimt", "Qarabag FK": "FK Qarabag", "Malmo FF": "Malmö FF", "Hacken": "BK Häcken", "BK Hacken": "BK Häcken",
+    "Djurgardens IF": "Djurgården", "Shakhtar Donetsk": "Shakhtar Donetsk", "Dynamo Kyiv": "Dynamo Kyiv", "Legia Warsaw": "Legia Warsaw",
+    "Rakow Czestochowa": "Raków Czestochowa", "Rapid Wien": "Rapid Vienna", "Rapid Vienna": "Rapid Vienna", "Maccabi Tel Aviv": "Maccabi Tel-Aviv",
+    "Vitoria Guimaraes": "Vitória de Guimaraes", "Vikingur Reykjavik": "Vikingur Reykjavik", "Rigas FS": "Rigas Futbola Skola", "RFS": "Rigas Futbola Skola",
+    "Besiktas JK": "Besiktas", "Ferencvaros TC": "Ferencvaros", "Lech Poznan": "Lech Poznan", "Viktoria Plzen": "Viktoria Plzen",
+    "PFC Levski Sofia": "Levski Sofia", "PFC CSKA Sofia": "CSKA Sofia", "Pafos FC": "Pafos", "SC Braga": "Braga", "Atalanta BC": "Atalanta",
+    "FK Kauno Zalgiris": "Kauno Zalgiris", "FK Borac Banja Luka": "Borac Banja Luka", "FC Iberia 1999": "Iberia 1999", "Panathinaikos FC": "Panathinaikos",
+    "FK Jablonec": "Jablonec", "FC Ararat-Armenia": "Ararat-Armenia", "KF Egnatia": "Egnatia", "Bournemouth": "Bournemouth", "Rennes": "Rennes",
+}
+
+
 def _norm(s: str) -> str:
     s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode().lower()
-    s = re.sub(r"\b(fc|cf|afc|sc|ac|as|ssc|us|rc|rcd|cd|ud|sd|sk|fk|nk|bk|if|club|de|the|1\.|1846|1899|1909|1904|tsg|vfb|vfl|sv|bsc|ogc|rb|real|athletic|sporting|olympique|stade|racing)\b", " ", s)
+    s = re.sub(r"\b(fc|cf|afc|sc|ac|as|ssc|us|rc|rcd|cd|ud|sd|sk|fk|nk|bk|if|pfc|bc|tc|jk|kv|kf|club|de|the|1\.|1846|1899|1909|1904|1999|tsg|vfb|vfl|sv|bsc|ogc|rb|real|athletic|sporting|olympique|stade|racing)\b", " ", s)
     return re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+
+def match_name(name: str, candidates: dict[str, str]) -> str | None:
+    """Map an outside spelling to one of `candidates` (normalised -> canonical): alias table, exact, token subset, then difflib."""
+    alias = ODDS_API_ALIASES.get(name)
+    if alias is not None:
+        for c in candidates.values():
+            if c == alias:
+                return c
+    k = _norm(unicodedata.normalize("NFKD", alias or name).encode("ascii", "ignore").decode())
+    if k in candidates:
+        return candidates[k]
+    kt = set(k.split())
+    subset = [c for n, c in candidates.items() if kt and (kt <= set(n.split()) or set(n.split()) <= kt)]
+    if len(subset) == 1:
+        return subset[0]
+    close = difflib.get_close_matches(k, list(candidates), n=1, cutoff=0.75)
+    return candidates[close[0]] if close else None
 
 
 def load_espn(path: str | Path, tz: str = "Europe/Vienna"):
@@ -91,8 +132,10 @@ def load_espn(path: str | Path, tz: str = "Europe/Vienna"):
     return matches, odds, fixtures
 
 
-def load_odds_api(folder: str | Path, fixtures: pd.DataFrame, bookmaker: str = "bet365", tz: str = "Europe/Vienna"):
-    """bet365 1X2 prices for the ESPN fixtures from odds_<sport>.json files. -> (odds frame, log lines)"""
+def load_odds_api(folder: str | Path, fixtures: pd.DataFrame, bookmakers: tuple[str, ...] = ("bet365", "pinnacle", "williamhill", "betfair_ex_uk"),
+                  tz: str = "Europe/Vienna"):
+    """1X2 prices for the ESPN fixtures from odds_<sport>.json files: per match the first bookmaker in `bookmakers`
+    that quotes it (bet365 when The Odds API carries it, else Pinnacle as the sharpest reference). -> (odds frame, log lines)"""
     rows, log = [], []
     fx = fixtures.copy()
     fx["day"] = fx["date"].dt.strftime("%Y-%m-%d")
@@ -109,28 +152,24 @@ def load_odds_api(folder: str | Path, fixtures: pd.DataFrame, bookmaker: str = "
         if not isinstance(events, list):
             log.append(f"{Path(f).name}: not an event list ({str(events)[:80]})")
             continue
-        n_match, n_book = 0, 0
+        n_match, n_book, used = 0, 0, {}
         for ev in events:
             t = pd.Timestamp(ev["commence_time"]).tz_convert(tz).tz_localize(None)
             cands = fx[(fx["league"] == league) & (fx["day"] == t.strftime("%Y-%m-%d"))]
             if len(cands) == 0:
                 continue
             names = {_norm(x): x for x in pd.concat([cands["home"], cands["away"]])}
-            def pick(n):
-                k = _norm(n)
-                if k in names:
-                    return names[k]
-                c = difflib.get_close_matches(k, list(names), n=1, cutoff=0.6)
-                return names[c[0]] if c else None
-            h, a = pick(ev["home_team"]), pick(ev["away_team"])
+            h, a = match_name(ev["home_team"], names), match_name(ev["away_team"], names)
             m = cands[(cands["home"] == h) & (cands["away"] == a)]
             if len(m) != 1:
                 log.append(f"{league}: no fixture for {ev['home_team']} v {ev['away_team']} on {t:%d %b}")
                 continue
             n_match += 1
-            book = next((b for b in ev.get("bookmakers", []) if b.get("key") == bookmaker), None)
-            if book is None:
+            avail = {b.get("key"): b for b in ev.get("bookmakers", [])}
+            bookmaker = next((b for b in bookmakers if b in avail), None)
+            if bookmaker is None:
                 continue
+            book = avail[bookmaker]
             mk = next((x for x in book.get("markets", []) if x.get("key") == "h2h"), None)
             if mk is None:
                 continue
@@ -145,11 +184,12 @@ def load_odds_api(folder: str | Path, fixtures: pd.DataFrame, bookmaker: str = "
             if len(prices) != 3:
                 continue
             n_book += 1
+            used[bookmaker] = used.get(bookmaker, 0) + 1
             ts = pd.Timestamp(mk.get("last_update", ev["commence_time"])).tz_convert(tz).tz_localize(None)
             for sel, p in prices.items():
                 rows.append({"match_id": m["match_id"].iloc[0], "bookmaker": bookmaker, "market": "1X2", "selection": sel,
                              "odds": p, "timestamp": ts, "is_closing": False})
-        log.append(f"{Path(f).name}: {len(events)} events, {n_match} matched to fixtures, {n_book} with {bookmaker} prices")
+        log.append(f"{Path(f).name}: {len(events)} events, {n_match} matched to fixtures, {n_book} priced (" + ", ".join(f"{k} {v}" for k, v in used.items()) + ")")
     return pd.DataFrame(rows, columns=["match_id", "bookmaker", "market", "selection", "odds", "timestamp", "is_closing"]), log
 
 

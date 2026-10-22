@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 import os
-for cand in (os.environ.get("FOOTQUANT_PKG"), str(Path(__file__).resolve().parent / "footquant_model"), str(Path(__file__).resolve().parent), "/home/claude/footquant_model"):
+for cand in (os.environ.get("FOOTQUANT_PKG"), str(Path(__file__).resolve().parent / "footquant_model"), "/home/claude/footquant_model"):
     if cand and Path(cand).exists():
         sys.path.insert(0, cand)
         break
@@ -143,7 +143,9 @@ def main():
         for line in api_log:
             log("  odds api: " + line, fh)
         if len(b365) == 0:
-            log("  no bet365 prices for Europe yet (odds_*.json missing or empty) -> DraftKings prices from ESPN stand in; the desk shows the minimum bet365 price to take", fh)
+            log("  no Odds API prices for Europe (odds_*.json missing or empty) -> DraftKings prices from ESPN stand in; the desk shows the minimum bet365 price to take", fh)
+        elif not (b365.bookmaker == "bet365").any():
+            log("  The Odds API does not carry bet365 -> Pinnacle prices are the market reference; the desk shows the minimum bet365 price to take and the stake for the price you see", fh)
     else:
         u_hist = pd.DataFrame(columns=list(hist.columns) + ["neutral", "home_max_lead", "away_max_lead"])
         u_odds, u_fx, b365 = odds.iloc[0:0].copy(), pd.DataFrame(columns=["match_id", "date", "league", "season", "home", "away", "neutral"]), odds.iloc[0:0].copy()
@@ -235,9 +237,10 @@ def main():
         if len(u_live) and joint is not None:
             cand = pd.concat([b365, u_odds[(~u_odds.is_closing) & u_odds.match_id.isin(u_live.match_id)]], ignore_index=True)
             keep = []
+            pref = ["bet365", "pinnacle", "williamhill", "betfair_ex_uk", "DraftKings"]
             for mid, part in cand.groupby("match_id"):
                 books = set(part.bookmaker)
-                use = "bet365" if "bet365" in books else sorted(books)[0]
+                use = next((b for b in pref if b in books), sorted(books)[0])
                 price_source[mid] = use
                 keep.append(part[part.bookmaker == use])
             snaps = snapshots_from_frame(pd.concat(keep, ignore_index=True), bookmaker=None) if keep else []
@@ -454,13 +457,21 @@ def main():
                 json.dump(doc, open(docs_dir / f"{d['id']}.json", "w"), ensure_ascii=False)
                 writes.append({"op": "update", "collection": "bets", "doc_id": d["id"], "file_path": str((docs_dir / f"{d['id']}.json").resolve()),
                                "if_version": versions.get(d["id"])})
+    # watch-list documents from earlier runs that were not regenerated (priced properly now, or the match is gone) expire
+    generated = {d["id"] for d in docs}
+    for did, old_doc in existing.items():
+        if old_doc.get("status") == "watch" and did not in generated and not old_doc.get("placed"):
+            json.dump({"status": "expired"}, open(docs_dir / f"{did}.json", "w"))
+            writes.append({"op": "update", "collection": "bets", "doc_id": did, "file_path": str((docs_dir / f"{did}.json").resolve()),
+                           "if_version": versions.get(did)})
     json.dump(status_doc, open(docs_dir / "status.json", "w"), ensure_ascii=False)
     writes.append({"op": "set", "collection": "meta", "doc_id": "status", "file_path": str((docs_dir / "status.json").resolve()),
                    "if_version": versions.get("meta/status")})
     for i in range(0, len(writes), 50):
         json.dump(writes[i:i + 50], open(out / "dash" / f"db_batch_{i // 50 + 1}.json", "w"), indent=0)
     n_set = sum(1 for w in writes if w["op"] == "set") - 1
-    log(f"desk database: {n_set} new documents, {len(writes) - 1 - n_set} to update, {len(docs) - len(writes) + 1} unchanged -> dash/db_batch_*.json "
+    n_upd = len(writes) - 1 - n_set
+    log(f"desk database: {n_set} new documents, {n_upd} to update (incl. expired watch entries), {max(len(docs) - n_set - n_upd, 0)} unchanged -> dash/db_batch_*.json "
         f"({(len(writes) + 49) // 50} batch file(s){'; fill in if_version from the listing' if not versions else ''})", fh)
     log(f"app documents: {len(docs)} bets ({sum(d['status'] == 'open' for d in docs)} open, {sum(d['status'] == 'watch' for d in docs)} to watch) -> dash/bets.json, dash/status.json", fh)
 
