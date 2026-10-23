@@ -33,7 +33,7 @@ from footquant.market.devig import devig  # noqa: E402
 from footquant.market.odds_feed import snapshots_from_frame  # noqa: E402
 from footquant.models.dixon_coles import DixonColesModel  # noqa: E402
 from footquant.paper_trading import Ledger, make_bet_sheet, pooled_fixture  # noqa: E402
-from footquant.market.exchange import EpCurve, clv_vs_exchange, ep_events, exchange_table, screen, verdict  # noqa: E402
+from footquant.market.exchange import EpCurve, build_slips, clv_vs_exchange, ep_events, exchange_table, screen, settle_slip, verdict  # noqa: E402
 from footquant.config import DEFAULT_EARLY_PAYOUT_COMPETITIONS  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -106,7 +106,7 @@ def ledger_from_docs(folder: Path) -> pd.DataFrame:
         else:
             continue
         rows.append({
-            "run_id": run_id, "placed_at": d.get("recorded_at") or d.get("placed_at"), "match_id": d["match_id"], "date": pd.Timestamp(d["kickoff"]),
+            "run_id": run_id, "placed_at": d.get("recorded_at") or d.get("placed_at"), "match_id": d["match_id"], "date": uk(d["kickoff"], d.get("league_code"), d.get("kickoff_tz")),
             "league": d.get("league_code") or next((k for k, v in SHORT.items() if v == d.get("league")), d.get("league")),
             "home": d["home"], "away": d["away"], "selection": d["selection"], "odds": odds,
             "p_model": d.get("p_model"), "p_market": d.get("p_market"), "p_pool": d.get("p_pool"), "ep_bonus": d.get("ep_bonus"),
@@ -133,6 +133,17 @@ def vienna(ts, league):
     return t
 
 
+def uk(ts, league, tz=None):
+    """Inverse of vienna(): the Desk stores domestic kick-offs in Vienna time; internally they stay UK time (football-data)."""
+    t = pd.Timestamp(ts)
+    if league in DOMESTIC and t.tzinfo is None and tz in (None, "Europe/Vienna"):  # every Desk document is in Vienna time since 23 Oct 2026
+        try:
+            return t.tz_localize("Europe/Vienna", ambiguous=False, nonexistent="shift_forward").tz_convert("Europe/London").tz_localize(None)
+        except Exception:
+            return t
+    return t
+
+
 def bet_on(r):
     return r["home"] if r["selection"] == "home" else r["away"] if r["selection"] == "away" else "Draw"
 
@@ -150,6 +161,10 @@ def main():
     ap.add_argument("--uefa-days", type=int, default=7, help="price European fixtures this many days ahead")
     ap.add_argument("--max-odds", type=float, default=None, help="skip picks priced above this (no cap by default)")
     ap.add_argument("--kelly", choices=["quarter", "half"], default="quarter")
+    ap.add_argument("--fun-pot", type=float, default=10.0, help="weekly stake on the fun-pot fold (0 = none)")
+    ap.add_argument("--fun-legs", type=int, default=6, help="legs in the fun-pot fold")
+    ap.add_argument("--core-multis", choices=["yes", "no"], default="yes", help="add a core double and treble from the best value legs")
+    ap.add_argument("--multi-max-leg", type=float, default=None, help="core multiples only from legs priced at or below this (none = any leg within the odds cap)")
     ap.add_argument("--settings", default=None, help="JSON exported from the Desk's settings/main: bankroll, edge_margin, max_odds, kelly override the flags")
     args = ap.parse_args()
     if args.settings and Path(args.settings).exists():
@@ -163,6 +178,14 @@ def main():
             args.max_odds = float(st_in["max_odds"])
         if st_in.get("kelly") in ("quarter", "half"):
             args.kelly = st_in["kelly"]
+        if st_in.get("fun_pot") is not None:
+            args.fun_pot = float(st_in["fun_pot"] or 0)
+        if st_in.get("fun_legs"):
+            args.fun_legs = int(st_in["fun_legs"])
+        if "multi_max_leg" in st_in:
+            args.multi_max_leg = float(st_in["multi_max_leg"]) if st_in["multi_max_leg"] else None
+        if st_in.get("core_multis") is not None:
+            args.core_multis = "yes" if st_in["core_multis"] else "no"
     data, out = Path(args.data), Path(args.out)
     (out / "dash").mkdir(parents=True, exist_ok=True)
     now = pd.Timestamp(args.now) if args.now else pd.Timestamp.now()
@@ -390,8 +413,31 @@ def main():
             sheet_run += f"; Europe: {len(u_live)} fixtures priced" + ("" if n_b365 == len(price_source) else " on stand-in prices")
         elif len(u_fx):
             log(f"UEFA: no European fixtures in the next {args.uefa_days} days (next on {u_fx.date.min():%d %b})", fh)
+        new_slips = []
+        if len(live) and len(card):
+            # slips only from legs that start at least an hour after the run, so there is time to place them
+            later = lambda df: df[[vienna(d_, l_) > now + pd.Timedelta(minutes=60) for d_, l_ in zip(df["date"], df["league"])]] if len(df) else df
+            new_slips = build_slips(later(sheet), later(card), args.margin, args.bankroll, scfg.kelly_fraction, args.max_odds, args.fun_pot, args.fun_legs,
+                                    run_id=f"slips-{today}", core_multis=args.core_multis == "yes", max_stake_frac=scfg.max_stake_frac, round_to=scfg.round_to,
+                                    multi_max_leg=args.multi_max_leg)
+            # one exposure cap for the core (singles + core multiples); the fun pot sits outside it
+            core_total = (float(sheet["stake"].sum()) if len(sheet) else 0.0) + sum(x["stake"] for x in new_slips if x["pot"] == "core")
+            if core_total > scfg.max_total_frac * args.bankroll:
+                k = scfg.max_total_frac * args.bankroll / core_total
+                if len(sheet):
+                    sheet["stake"] = np.floor(sheet["stake"] * k / scfg.round_to) * scfg.round_to
+                for x in new_slips:
+                    if x["pot"] == "core":
+                        x["stake"] = float(np.floor(x["stake"] * k / scfg.round_to) * scfg.round_to)
+                log(f"  core stakes scaled by {k:.2f} to keep singles + multiples within {scfg.max_total_frac:.0%} of the bankroll", fh)
+            for x in new_slips:
+                log(f"  slip ({x['pot']}): {x['kind']} at {x['odds']:.2f}, real chance {x['p_paid']:.0%}, value {x['ev']:+.1%}, stake {x['stake']:.2f}: "
+                    + " + ".join(f"{l['home'] if l['selection'] == 'home' else l['away']} {l['odds']:.2f}" for l in x["legs"]), fh)
+            if args.fun_pot and not any(x["pot"] == "fun" for x in new_slips):
+                log(f"  fun pot: fewer than {args.fun_legs} bet365 favourites at 1.50 or shorter on the card -> no fold this round", fh)
         sheet.to_csv(out / f"sheet_{today}.csv", index=False)
     else:
+        new_slips = []
         sheet = pd.DataFrame(columns=["match_id"])
         sheet_run = "no sheet produced in this run"
         price_source = {}
@@ -407,6 +453,35 @@ def main():
         import shutil
         shutil.copy(args.ledger, ledger_path)
     led = Ledger(ledger_path)
+    # rules changed before kick-off: an earlier run's open pick that this run no longer makes is withdrawn from the record
+    # (never a placed pick, never a match that has started), so the record always reflects the rules in force
+    withdrawn = []
+    if args.mode in ("sheet", "both") and len(live) and len(led.df) and args.ledger_docs:
+        import hashlib as _h, json as _j
+        placed_keys = set()
+        for f in Path(args.ledger_docs).rglob("*.json"):
+            try:
+                d_ = _j.load(open(f, encoding="utf-8"))
+            except Exception:
+                continue
+            if isinstance(d_, dict) and d_.get("placed") and "match_id" in d_:
+                placed_keys.add((d_["match_id"], d_.get("selection")))
+        keep_keys = set(zip(sheet["match_id"], sheet["selection"])) if len(sheet) else set()
+        live_ids = set(live["match_id"])
+        dates = led.df["match_id"].map(dict(zip(live["match_id"], live["date"])))
+        m_ = (~led.df["settled"].astype(bool)) & led.df["match_id"].isin(live_ids) & led.df["run_id"].astype(str).str.startswith("sheet-")
+        for i, r_ in led.df[m_].iterrows():
+            k_ = (r_["match_id"], r_["selection"])
+            if k_ in keep_keys or k_ in placed_keys:
+                continue
+            if vienna(dates.loc[i], r_["league"]) <= now:
+                continue
+            withdrawn.append(_h.sha1(f"{r_['match_id']}|{r_['selection']}".encode()).hexdigest()[:16])
+            led.df = led.df.drop(index=i)
+        if withdrawn:
+            led.df = led.df.reset_index(drop=True)
+            led.save()
+            log(f"ledger: {len(withdrawn)} open pick(s) from an earlier run withdrawn (they no longer pass the rules in force)", fh)
     if len(sheet):
         n_new = led.append(sheet)
         log(f"ledger: {n_new} new bets recorded", fh)
@@ -504,7 +579,7 @@ def main():
                 ep = "unknown" if r.get("ep_unverified") else "no"
             docs.append({
                 "id": doc_id, "match_id": r["match_id"], "run_id": r["run_id"], "league": SHORT.get(r["league"], r["league"]),
-                "kickoff": kick.strftime("%Y-%m-%dT%H:%M:00"), "day": kick.strftime("%Y-%m-%d"),
+                "kickoff": kick.strftime("%Y-%m-%dT%H:%M:00"), "kickoff_tz": "Europe/Vienna", "day": kick.strftime("%Y-%m-%d"),
                 "home": r["home"], "away": r["away"], "match": f"{r['home']} – {r['away']}", "bet_on": bet_on(r), "selection": r["selection"],
                 "odds": round(float(r["odds"]), 2), "stake": round(float(r["stake"]), 2), "edge": round(float(r["edge"]), 4), "ev": round(float(r["ev"]), 4),
                 "ep_bonus": round(float(r["ep_bonus"]), 4), "note": "bet365 pays early if they lead by 2" if float(r["ep_bonus"]) > 0 else "",
@@ -535,6 +610,44 @@ def main():
             "score": "", "pnl": None, "early_payout": "", "closing_odds": None, "clv": None,
         })
     json.dump(docs, open(out / "dash" / "bets.json", "w"), indent=1)
+    # --- slips (core multiples and the fun pot): settle the open ones, record the new ones --------------------------
+    res_map = {}
+    for x in all_hist.to_dict("records"):
+        hml, aml = x.get("home_max_lead"), x.get("away_max_lead")
+        res_map[x["match_id"]] = (int(x["home_goals"]), int(x["away_goals"]),
+                                  None if hml is None or pd.isna(hml) else float(hml), None if aml is None or pd.isna(aml) else float(aml))
+    old_slips = {}
+    if args.ledger_docs and (Path(args.ledger_docs) / "slips").exists():
+        for f in (Path(args.ledger_docs) / "slips").glob("*.json"):
+            try:
+                old_slips[f.stem] = json.load(open(f, encoding="utf-8"))
+            except Exception:
+                pass
+    slip_writes = {}
+    n_slip_settled = 0
+    for sid, sl in old_slips.items():
+        if sl.get("status") == "open":
+            st_ = settle_slip(sl, res_map, ep_leagues)
+            if st_:
+                slip_writes[sid] = ("update", {**st_, "settled_at": now.strftime("%Y-%m-%dT%H:%M:00")})
+                old_slips[sid] = {**sl, **st_}
+                n_slip_settled += 1
+    for x in new_slips:
+        sid = hashlib.sha1((f"{x['run_id']}|{x['pot']}|{x['kind']}|" + "|".join(l["match_id"] + l["selection"] for l in x["legs"])).encode()).hexdigest()[:16]
+        if sid in old_slips:
+            continue
+        legs = [{**l, "date": vienna(l["date"], l["league"]).strftime("%Y-%m-%dT%H:%M:00"), "league": SHORT.get(l["league"], l["league"]), "league_code": l["league"],
+                 "bet_on": l["home"] if l["selection"] == "home" else l["away"] if l["selection"] == "away" else "Draw"} for l in x["legs"]]
+        doc = {**x, "legs": legs, "first_kickoff": min(l["date"] for l in legs), "placed": False}
+        slip_writes[sid] = ("set", doc)
+        old_slips[sid] = doc
+    sl_all = list(old_slips.values())
+    def _rec(pot):
+        d_ = [x for x in sl_all if x.get("pot") == pot and x.get("status") in ("won", "lost")]
+        return {"n": len(d_), "won": sum(x["status"] == "won" for x in d_), "staked": round(sum(float(x["stake"]) for x in d_), 2), "pnl": round(sum(float(x.get("pnl") or 0) for x in d_), 2)}
+    slip_rec = {"core": _rec("core"), "fun": _rec("fun"), "open": sum(x.get("status") == "open" for x in sl_all)}
+    log(f"slips: {sum(1 for v in slip_writes.values() if v[0] == 'set')} new, {n_slip_settled} settled; record core {slip_rec['core']}, fun pot {slip_rec['fun']}", fh)
+    json.dump({k: v[1] for k, v in slip_writes.items()}, open(out / "dash" / "slips.json", "w"), indent=1, default=str)
     uefa_loaded = ", ".join(SHORT[l] for l in UEFA_LEAGUES) if len(u_hist) else ""
     status_doc = {"as_of": now.strftime("%Y-%m-%dT%H:%M:00"), "history_matches": int(len(all_hist)), "history_to": str(all_hist.date.max().date()),
                   "leagues_loaded": ", ".join(SHORT.get(l, l) for l in leagues) + (", " + uefa_loaded if uefa_loaded else ""),
@@ -546,6 +659,7 @@ def main():
                   "price_reference": "Betfair Exchange fair price (football-data.co.uk), early payout from the measured curve" if curve is not None else "model pooled with bet365",
                   "ep_curve": curve.describe() if curve is not None else "", "data_warning": data_warning,
                   "sheet_bets": int(len(sheet)) if args.mode in ("sheet", "both") else 0,
+                  "fun_pot": args.fun_pot, "fun_legs": args.fun_legs, "core_multis": args.core_multis == "yes", "multi_max_leg": args.multi_max_leg, "slips": slip_rec,
                   "clv_n": test["n"], "clv_mean": test["mean"], "clv_lower95": test["lower95"], "clv_share_positive": test["share_positive"], "clv_verdict": test["verdict"]}
     json.dump(status_doc, open(out / "dash" / "status.json", "w"), indent=1)
     # price card: every upcoming fixture with its exchange fair price and the minimum price worth taking
@@ -600,6 +714,9 @@ def main():
                 json.dump(doc, open(docs_dir / f"{d['id']}.json", "w"), ensure_ascii=False)
                 writes.append({"op": "update", "collection": "bets", "doc_id": d["id"], "file_path": str((docs_dir / f"{d['id']}.json").resolve()),
                                "if_version": versions.get(d["id"])})
+    for did in withdrawn:
+        json.dump({"status": "withdrawn", "note": "withdrawn before kick-off: no longer passes the rules in force"}, open(docs_dir / f"{did}.json", "w"))
+        writes.append({"op": "update", "collection": "bets", "doc_id": did, "file_path": str((docs_dir / f"{did}.json").resolve()), "if_version": versions.get(did)})
     # watch-list documents from earlier runs that were not regenerated (priced properly now, or the match is gone) expire
     generated = {d["id"] for d in docs}
     for did, old_doc in existing.items():
@@ -610,6 +727,12 @@ def main():
     json.dump(status_doc, open(docs_dir / "status.json", "w"), ensure_ascii=False)
     writes.append({"op": "set", "collection": "meta", "doc_id": "status", "file_path": str((docs_dir / "status.json").resolve()),
                    "if_version": versions.get("meta/status")})
+    for sid, (op, body) in slip_writes.items():
+        json.dump(body, open(docs_dir / f"slip_{sid}.json", "w"), ensure_ascii=False, default=str)
+        w_ = {"op": op, "collection": "slips", "doc_id": sid, "file_path": str((docs_dir / f"slip_{sid}.json").resolve())}
+        if op == "update":
+            w_["if_version"] = versions.get(f"slips/{sid}")
+        writes.append(w_)
     if args.mode in ("sheet", "both"):
         json.dump(prices_doc, open(docs_dir / "prices.json", "w"), ensure_ascii=False, default=str)
         writes.append({"op": "set", "collection": "meta", "doc_id": "prices", "file_path": str((docs_dir / "prices.json").resolve()),

@@ -229,3 +229,90 @@ def verdict(clv: pd.Series, n_min: int = 150) -> dict:
     else:
         v = f"keep testing: {n} of the {n_min} bets needed"
     return {"n": n, "mean": round(mean, 4), "lower95": round(lo, 4) if np.isfinite(lo) else None, "share_positive": round(share, 3), "verdict": v}
+
+
+# --- slips: core double/treble from the best value legs, and the fun-pot fold -----------------------------------
+# Backtest (81 weeks, 2024/25-2026/27, setup "C": quarter Kelly, value >= 2%, odds cap 4.00, plus a EUR 10 six-fold):
+# core +12% per euro staked (+-8%), worst drawdown about EUR 1,500 on EUR 10,000; the six-fold of the six shortest
+# favourites pays about 4.35, lands about one week in four, and costs about 1 cent per euro on average.
+
+def _leg(r: dict) -> dict:
+    return {"match_id": r["match_id"], "league": r["league"], "home": r["home"], "away": r["away"], "date": str(pd.Timestamp(r["date"])),
+            "selection": r["selection"], "odds": round(float(r["odds"]), 2), "p": round(float(r["p"]), 4), "ep": round(float(r["ep"]), 4)}
+
+
+def build_slips(sheet: pd.DataFrame, card: pd.DataFrame, margin: float, bankroll: float, kelly_mult: float, max_odds: float | None,
+                fun_pot: float, fun_legs: int, run_id: str, core_multis: bool = True, max_stake_frac: float = 0.05,
+                round_to: float = 0.5, fun_max_leg: float = 1.50, multi_max_leg: float | None = None) -> list[dict]:
+    """Core double and treble from the sheet's best value legs (one per match, highest value first), Kelly-sized on the
+    combined price and combined chance (each leg's exchange chance plus its early-payout chance, matches independent),
+    kept only when the combined value clears `margin`. Fun pot: one fold of the `fun_legs` shortest-priced bet365
+    favourites (<= fun_max_leg) on the card, staked `fun_pot` regardless of value."""
+    slips = []
+    if core_multis and len(sheet) >= 2:
+        s = sheet[sheet["selection"] != "draw"].sort_values("ev", ascending=False).drop_duplicates("match_id")
+        if max_odds:
+            s = s[s["odds"] <= max_odds]
+        if multi_max_leg:
+            s = s[s["odds"] <= multi_max_leg]  # core multiples only from legs at or below this price
+        legs_all = [_leg({**r, "p": r["p_market"], "ep": r["ep_bonus"]}) for r in s.head(3).to_dict("records")]
+        for n, kind in ((2, "double"), (3, "treble")):
+            if len(legs_all) < n:
+                continue
+            legs = legs_all[:n]
+            O = float(np.prod([l["odds"] for l in legs]))
+            P = float(np.prod([min(l["p"] + l["ep"], 1.0) for l in legs]))
+            ev = P * O - 1.0
+            if ev < margin:
+                continue
+            f = min(kelly_mult * ev / (O - 1.0), max_stake_frac)
+            stake = float(np.floor(f * bankroll / round_to) * round_to)
+            if stake > 0:
+                slips.append({"kind": kind, "pot": "core", "legs": legs, "odds": round(O, 4), "p_paid": round(P, 6), "ev": round(ev, 6), "stake": stake})
+    if fun_pot and fun_pot > 0 and len(card):
+        cands = []
+        for r in card.to_dict("records"):
+            if not r.get("priced"):
+                continue
+            best = None
+            for s in ("home", "away"):
+                o = r.get(f"b365_{s}")
+                if o and o <= fun_max_leg and (best is None or o < best[1]):
+                    best = (s, o)
+            if best:
+                cands.append(_leg({**r, "selection": best[0], "odds": best[1], "p": r[f"p_{best[0]}"], "ep": r[f"ep_{best[0]}"]}))
+        cands.sort(key=lambda l: l["odds"])
+        if len(cands) >= fun_legs:
+            legs = cands[:fun_legs]
+            O = float(np.prod([l["odds"] for l in legs]))
+            P = float(np.prod([min(l["p"] + l["ep"], 1.0) for l in legs]))
+            slips.append({"kind": f"{fun_legs}-fold", "pot": "fun", "legs": legs, "odds": round(O, 4), "p_paid": round(P, 6), "ev": round(P * O - 1, 6), "stake": float(fun_pot)})
+    for sl in slips:
+        sl["run_id"] = run_id
+        sl["status"] = "open"
+        sl["first_kickoff"] = min(l["date"] for l in sl["legs"])
+    return slips
+
+
+def settle_slip(slip: dict, results: dict, ep_leagues, lead: int = 2) -> dict | None:
+    """`results`: match_id -> (home_goals, away_goals, home_max_lead, away_max_lead). A leg is paid when its side won, or,
+    for a home/away leg in an early-payout competition, when it led by `lead` (bet365's offer applies to each leg of a
+    multiple). Returns the settled fields, or None while any leg is unplayed or a needed goal timeline is missing."""
+    paid = []
+    for l in slip["legs"]:
+        res = results.get(l["match_id"])
+        if res is None or any(v is None for v in res[:2]):
+            return None
+        hg, ag, hml, aml = res
+        won = {"home": hg > ag, "away": ag > hg, "draw": hg == ag}[l["selection"]]
+        if not won and l["selection"] != "draw" and (l.get("league_code") or l["league"]) in ep_leagues:
+            ml = hml if l["selection"] == "home" else aml
+            own = hg if l["selection"] == "home" else ag
+            if ml is None or (isinstance(ml, float) and np.isnan(ml)):
+                if own >= lead:
+                    return None  # could have led by two: wait for the goal timeline
+            else:
+                won = ml >= lead
+        paid.append({**l, "score": f"{hg}–{ag}", "paid": bool(won)})
+    allw = all(x["paid"] for x in paid)
+    return {"legs": paid, "status": "won" if allw else "lost", "pnl": round(slip["stake"] * (slip["odds"] - 1.0), 2) if allw else -float(slip["stake"])}

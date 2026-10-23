@@ -28,6 +28,13 @@ fixture, its fair price and the lowest price worth taking at bet365 and elsewher
 the **exchange close**; `meta/status` carries the edge test (`clv_n`, `clv_mean`, `clv_lower95`, `clv_verdict`). When the
 fixtures file holds no upcoming matches the run records nothing and says why in `data_warning` (no more dry runs).
 
+**Slips (since 23 Oct 2026, setup "C2")**: besides the singles, each sheet run writes up to three documents to the
+collection `slips`: a core double and treble built from the best value legs priced at or below `multi_max_leg` (2.00),
+Kelly-sized on the combined price, and the fun-pot fold (`fun_legs` = 6 shortest bet365 favourites at 1.50 or shorter,
+staked `fun_pot` = EUR 10 whatever the value). Slips only use legs starting at least an hour after the run. Every run
+settles open slips (early payout counted on each leg). If the rules change before kick-off, an earlier run's open,
+unplaced single that no longer passes is set to `status: "withdrawn"`.
+
 Tuesday run = bet sheet for the midweek round (Tue-Thu). Friday run = settle midweek, bet sheet for the weekend.
 Monday run = settle the weekend. All use `--mode both`. European fixtures within 7 days are priced on every run.
 
@@ -44,9 +51,10 @@ Monday run = settle the weekend. All use `--mode both`. European fixtures within
    (a python heredoc is fine). It holds Miguel's rules: `bankroll`, `edge_margin` (required edge, e.g. 0.02), `max_odds`
    (odds cap or null) and `kelly` ("quarter" or "half"). Missing fields mean the defaults (1000, 0.01, none, quarter).
 3. **Export the record of bets**: ArtifactData `list` collection `bets` with `query.limit` 1000 and
-   `out_dir` `/home/claude/fq_docs` (page with `query.cursor` while `next_cursor` is returned). The listing shows every
+   `out_dir` `/home/claude/fq_docs` (page with `query.cursor` while `next_cursor` is returned), and the same for the
+   collection `slips` (it lands in `/home/claude/fq_docs/slips/`). The listing shows every
    document's `version`: write them to `/home/claude/fq_docs/versions.json` as `{"<doc_id>": <version>, ...,
-   "meta/status": <version of meta/status from a get>, "meta/prices": <version of meta/prices from a get, if it exists>}`
+   "meta/status": <version of meta/status from a get>, "meta/prices": <version of meta/prices from a get, if it exists>, "slips/<doc_id>": <version>, ...}`
    (a small python heredoc is fine).
 4. **Run**: `pip install --break-system-packages numpy scipy pandas scikit-learn` if an import fails, then
    `python3 /home/claude/fq/live_run.py --data /home/claude/fq/data --out /home/claude/fq_out
@@ -65,7 +73,8 @@ Monday run = settle the weekend. All use `--mode both`. European fixtures within
 7. **Report** with SendUserMessage: the bet sheet as a table (date, league, match, bet on, odds, stake) — or
    "no bets this round" — plus, when European fixtures were priced from stand-in prices, one line saying how many are
    on the Desk's watch list waiting for a bet365 price; then one line on the ledger (bets settled, profit/loss, mean
-   price edge vs the exchange close), one line with the edge test verdict (`clv_verdict` in the status), and the
+   price edge vs the exchange close), one line per new slip (kind, legs, odds, real chance, stake) and one line on
+   slips settled, one line with the edge test verdict (`clv_verdict` in the status), and the
    `data_warning` if there is one, ending with the Desk link. Nothing else.
 
 If the clone fails or the Desk cannot be read, send one line saying what failed and stop.
