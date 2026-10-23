@@ -33,6 +33,8 @@ from footquant.market.devig import devig  # noqa: E402
 from footquant.market.odds_feed import snapshots_from_frame  # noqa: E402
 from footquant.models.dixon_coles import DixonColesModel  # noqa: E402
 from footquant.paper_trading import Ledger, make_bet_sheet, pooled_fixture  # noqa: E402
+from footquant.market.exchange import EpCurve, clv_vs_exchange, ep_events, exchange_table, screen, verdict  # noqa: E402
+from footquant.config import DEFAULT_EARLY_PAYOUT_COMPETITIONS  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from uefa_data import COMP, OTHER_LEAGUE, load_espn, load_odds_api, team_leagues  # noqa: E402
@@ -41,7 +43,7 @@ from domestic_data import attach_timelines  # noqa: E402
 SHORT = {"ENG-Premier League": "Premier League", "ESP-La Liga": "La Liga", "ITA-Serie A": "Serie A", "GER-Bundesliga": "Bundesliga", "FRA-Ligue 1": "Ligue 1",
          "UEFA-Champions League": "Champions League", "UEFA-Europa League": "Europa League", "UEFA-Conference League": "Conference League", OTHER_LEAGUE: "Europe (other clubs)"}
 UEFA_LEAGUES = list(COMP.values())
-UEFA_W = 0.01  # weight on the model for the European competitions (no walk-forward test yet; the domestic leagues came out at 0.00-0.01)
+UEFA_W = 0.0  # weight on the model for the European competitions: the domestic leagues come out at 0.00-0.01 against the market, so Europe is priced off the sharp book (Pinnacle via The Odds API)
 HIST_ROWS = [
     {"league": "Premier League", "season": "2017-18", "n_test": 380, "w_model": 0.000, "rps_model": 0.1892, "rps_market": 0.1862, "rps_pool": 0.1862, "source": "Understat xG + football-data mirror"},
     {"league": "Premier League", "season": "2018-19", "n_test": 380, "w_model": 0.000, "rps_model": 0.1842, "rps_market": 0.1855, "rps_pool": 0.1855, "source": "Understat xG + football-data mirror"},
@@ -67,6 +69,16 @@ def load_history(data: Path):
         frames.append(mm)
         odds.append(oo)
     return pd.concat(frames, ignore_index=True), pd.concat(odds, ignore_index=True)
+
+
+def load_exchange(data: Path) -> pd.DataFrame:
+    """Betfair Exchange fair prices (before kick-off and at the close) and named bookmakers' prices, per match."""
+    frames = []
+    for f in sorted(glob.glob(str(data / "*_????.csv"))):
+        m = re.match(r"([A-Z]+\d)_(\d\d)(\d\d)\.csv$", Path(f).name)
+        if m and m.group(1) in DIV_TO_LEAGUE:
+            frames.append(exchange_table(f, DIV_TO_LEAGUE[m.group(1)], f"20{m.group(2)}-{m.group(3)}"))
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["match_id"])
 
 
 def ledger_from_docs(folder: Path) -> pd.DataFrame:
@@ -105,6 +117,20 @@ def ledger_from_docs(folder: Path) -> pd.DataFrame:
             "closing_odds": d.get("closing_odds"), "clv": d.get("clv"),
         })
     return pd.DataFrame(rows, columns=LEDGER_COLUMNS)
+
+
+DOMESTIC = set(DIV_TO_LEAGUE.values())
+
+
+def vienna(ts, league):
+    """football-data.co.uk kick-off times are UK time; show the domestic leagues in Vienna time (Europe stays as loaded)."""
+    t = pd.Timestamp(ts)
+    if league in DOMESTIC and t.tzinfo is None:
+        try:
+            return t.tz_localize("Europe/London", ambiguous=False, nonexistent="shift_forward").tz_convert("Europe/Vienna").tz_localize(None)
+        except Exception:
+            return t
+    return t
 
 
 def bet_on(r):
@@ -150,6 +176,18 @@ def main():
     leagues = sorted(hist["league"].unique())
     log(f"run {now:%Y-%m-%d %H:%M} | {len(hist)} matches in {len(leagues)} leagues: " + ", ".join(f"{SHORT.get(l, l)} {int((hist.league == l).sum())}" for l in leagues), fh)
     log(f"xG available for {int(hist.home_xg.notna().sum())} matches (current-season files only)", fh)
+    # --- fair prices: Betfair Exchange (football-data BFE columns), and the bet365 early-payout curve -----------
+    ex = load_exchange(data)
+    ep_leagues = DEFAULT_EARLY_PAYOUT_COMPETITIONS
+    curve = None
+    if "fx_home" in ex.columns and "home_max_lead" in hist.columns:
+        ev_rows = ep_events(hist, ex)
+        if len(ev_rows) >= 500:
+            curve = EpCurve.fit(ev_rows.p, ev_rows.ep)
+            log(f"exchange prices for {int(ex.fx_home.notna().sum())} of {len(ex)} matches; early-payout curve from {curve.n} sides "
+                f"(led by two, did not win: {ev_rows.ep.mean():.1%} overall; by fair win chance {curve.describe()})", fh)
+    if curve is None:
+        log("no exchange prices or goal timelines -> early-payout curve unavailable; the old model sheet is used", fh)
 
     # --- European competitions: results/fixtures from the ESPN extract, bet365 prices from The Odds API files ---
     uefa_path = data / "uefa_espn.csv"
@@ -175,7 +213,8 @@ def main():
     mcfg = ModelConfig(xg_weight=0.6, xi=0.003)
     vcfg = ValueConfig(edge_margin=args.margin, markets=frozenset({"1X2"}))
     scfg = StakingConfig(kelly_mode=args.kelly)
-    log(f"rules: bankroll {args.bankroll:.0f}, required value {args.margin:.1%} per euro staked, odds cap {args.max_odds if args.max_odds else 'none'}, {args.kelly} Kelly; early payout x{vcfg.early_payout_scale:.2f} (underdogs) to x{vcfg.early_payout_scale_favourite:.2f} (favourites) of the simulated rate", fh)
+    log(f"rules: bankroll {args.bankroll:.0f}, required value {args.margin:.1%} per euro staked, odds cap {args.max_odds if args.max_odds else 'none'}, {args.kelly} Kelly; "
+        + ("bet365 early payout from the measured curve" if curve is not None else f"early payout x{vcfg.early_payout_scale:.2f} (underdogs) to x{vcfg.early_payout_scale_favourite:.2f} (favourites) of the simulated rate"), fh)
 
     def cap_odds(df):
         if args.max_odds and len(df):
@@ -191,10 +230,18 @@ def main():
         part = hist[hist.league == lg]
         start = part.sort_values("date")["date"].iloc[min(380, len(part) - 1)]
         preds = walk_forward(part, mcfg, BacktestConfig(refit_every_days=7, min_train_matches=300), start_date=start)
-        o = odds[(odds.market == "1X2") & (~odds.is_closing)].pivot_table(index="match_id", columns="selection", values="odds")
-        preds = preds[preds.match_id.isin(o.index)]
-        o = o.loc[preds.match_id]
-        pk = np.array([devig([h, d, a], "shin") for h, d, a in zip(o.home, o.draw, o.away)])
+        # market reference: Betfair Exchange fair price where the files have it (sharp, ~1% overround), else bet365 (Shin)
+        if "fx_home" in ex.columns:
+            exl = ex[ex.fx_home.notna()].set_index("match_id")
+            preds = preds[preds.match_id.isin(exl.index)]
+            pk = exl.loc[preds.match_id, ["fx_home", "fx_draw", "fx_away"]].values
+            ref_name = "exchange"
+        else:
+            o = odds[(odds.market == "1X2") & (~odds.is_closing)].pivot_table(index="match_id", columns="selection", values="odds")
+            preds = preds[preds.match_id.isin(o.index)]
+            o = o.loc[preds.match_id]
+            pk = np.array([devig([h, d, a], "shin") for h, d, a in zip(o.home, o.draw, o.away)])
+            ref_name = "bet365"
         pm = preds[["p_home", "p_draw", "p_away"]].values
         y = outcome_index(preds.home_goals.values, preds.away_goals.values)
         w, info = fit_pool_weight(pm, pk, y)
@@ -202,7 +249,7 @@ def main():
         mt_rows.append({"league": SHORT.get(lg, lg), "season": f"{start:%b %Y} to {part.date.max():%b %Y} (your files)", "n_test": len(preds), "w_model": round(w, 3),
                         "rps_model": rps(pm, y), "rps_market": rps(pk, y), "rps_pool": rps(np.exp(w * np.log(pm) + (1 - w) * np.log(pk)) / np.exp(w * np.log(pm) + (1 - w) * np.log(pk)).sum(axis=1, keepdims=True), y),
                         "source": "football-data files in the Drive folder"})
-        log(f"{SHORT.get(lg, lg)}: weight on model {w:.3f} over {len(preds)} matches (log loss model {info['log_loss_model']:.4f}, bet365 {info['log_loss_market']:.4f})", fh)
+        log(f"{SHORT.get(lg, lg)}: weight on model {w:.3f} over {len(preds)} matches (log loss model {info['log_loss_model']:.4f}, {ref_name} {info['log_loss_market']:.4f})", fh)
         m = DixonColesModel(mcfg)
         p = m.fit(part)
         cur = part[part.season == part.season.max()]
@@ -229,34 +276,61 @@ def main():
     pd.DataFrame(HIST_ROWS + mt_rows).round(4).to_csv(out / "dash" / "market_test.csv", index=False)
 
     # --- fixtures: live sheet if the file holds future matches in our leagues, else dry run -------
+    from footquant.paper_trading import LEDGER_COLUMNS
     fx, fx_odds = load_football_data_fixtures(data / "fixtures.csv", hist.season.max())
     fx = fx[fx.league.isin(leagues)]
-    live = fx[fx.date > now]
-    sheet_frames = []
+    live = fx[fx.apply(lambda r: vienna(r['date'], r['league']), axis=1) > now] if len(fx) else fx  # fixture times are UK time
+    fex = exchange_table(data / "fixtures.csv", DIV_TO_LEAGUE, hist.season.max())
+    card = pd.DataFrame()
+    data_warning = ""
+    # how fresh is the data? fetch.log (written by the GitHub workflow) says when fixtures.csv was last downloaded
+    flog = data / "fetch.log"
+    if flog.exists():
+        oks = [ln for ln in flog.read_text(errors="ignore").splitlines() if " ok " in f" {ln} " and "fixtures.csv" in ln]
+        if oks:
+            last_fetch = pd.Timestamp(oks[-1].split()[0]).tz_localize(None)
+            age_h = (pd.Timestamp.now(tz="UTC").tz_localize(None) - last_fetch).total_seconds() / 3600
+            log(f"fixtures.csv last downloaded {last_fetch:%a %d %b %H:%M} UTC ({age_h:.0f} h ago)", fh)
+            if age_h > 36:
+                data_warning = f"the fixtures file is {age_h:.0f} hours old (last download {last_fetch:%a %d %b %H:%M} UTC); prices may have moved"
     if args.mode in ("sheet", "both"):
         if len(live):
-            snaps = snapshots_from_frame(fx_odds[fx_odds.match_id.isin(live.match_id)])
             run_id = f"sheet-{today}"
+            placed_at = pd.Timestamp.now().isoformat(timespec="seconds")
             frames = []
-            for lg in leagues:
-                lf = live[live.league == lg]
-                if len(lf) == 0:
-                    continue
-                frames.append(make_bet_sheet(hist, lf, [s for s in snaps if s.match_id in set(lf.match_id)], weights[lg], args.bankroll, mcfg, vcfg, scfg, run_id=run_id))
-            sheet = cap_odds(pd.concat(frames, ignore_index=True)) if frames else pd.DataFrame()
-            sheet_run = f"live sheet of {today}: {len(live)} fixtures priced"
-            log(f"LIVE: {len(live)} upcoming fixtures in our leagues -> {len(sheet)} bets", fh)
+            have_ex = live.match_id.isin(fex.loc[fex["fx_home"].notna(), "match_id"]) if (curve is not None and "fx_home" in fex.columns) else pd.Series(False, index=live.index)
+            if have_ex.any():
+                b, card = screen(live[have_ex], fex, curve, args.margin, args.bankroll, scfg.kelly_fraction, args.max_odds, ep_leagues,
+                                 run_id, placed_at, max_stake_frac=scfg.max_stake_frac, round_to=scfg.round_to)
+                frames.append(b)
+                if args.max_odds:
+                    n_more = int(sum(1 for r in card.to_dict("records") if r.get("priced") and not r.get("pick") and any(
+                        (r.get(f"b365_{s}") or 0) > args.max_odds and (r.get(f"b365_{s}") or 0) >= r.get(f"min_b365_{s}", 99) for s in ("home", "away"))))
+                    if n_more:
+                        log(f"  {n_more} more fixture(s) show bet365 value above the odds cap of {args.max_odds:.2f}", fh)
+            rest = live[~have_ex]
+            if len(rest):
+                snaps = snapshots_from_frame(fx_odds[fx_odds.match_id.isin(rest.match_id)])
+                for lg in leagues:
+                    lf = rest[rest.league == lg]
+                    if len(lf):
+                        frames.append(make_bet_sheet(hist, lf, [s for s in snaps if s.match_id in set(lf.match_id)], weights[lg], args.bankroll, mcfg, vcfg, scfg, run_id=run_id))
+                log(f"  {len(rest)} fixture(s) without an exchange price -> priced with the model and bet365 as before", fh)
+            frames = [f for f in frames if len(f)]
+            sheet = cap_odds(pd.concat(frames, ignore_index=True)) if frames else pd.DataFrame(columns=LEDGER_COLUMNS)
+            total = float(sheet["stake"].sum()) if len(sheet) else 0.0
+            if total > scfg.max_total_frac * args.bankroll:  # exposure cap per round
+                sheet["stake"] = np.floor(sheet["stake"] * scfg.max_total_frac * args.bankroll / total / scfg.round_to) * scfg.round_to
+                log(f"  stakes scaled down to keep the round within {scfg.max_total_frac:.0%} of the bankroll", fh)
+            sheet_run = f"live sheet of {today}: {len(live)} fixtures priced off the Betfair Exchange" + (f" ({len(rest)} on the model)" if len(rest) else "")
+            log(f"LIVE: {len(live)} upcoming fixtures in our leagues, {int(have_ex.sum())} with exchange prices -> {len(sheet)} bets "
+                f"(bet365 price incl. early payout must return {args.margin:.0%} at the exchange fair price)", fh)
         else:
-            frames = []
-            for lg in leagues:
-                part = hist[hist.league == lg]
-                cut = part.date.max().normalize() - pd.Timedelta(days=6)
-                last = part[part.date >= cut]
-                snaps = snapshots_from_frame(odds[odds.match_id.isin(last.match_id) & (~odds.is_closing)])
-                frames.append(make_bet_sheet(part[part.date < cut], last[["match_id", "date", "league", "home", "away"]], snaps, weights[lg], args.bankroll, mcfg, vcfg, scfg, as_of=cut, run_id=f"dryrun-{cut:%Y-%m-%d}"))
-            sheet = cap_odds(pd.concat(frames, ignore_index=True))
-            sheet_run = "dry run on the last completed round (no upcoming fixtures in the fixtures file yet)"
-            log(f"no upcoming fixtures for our leagues in fixtures.csv (it covers {fx.date.min():%d %b}-{fx.date.max():%d %b} / {len(fx)} rows) -> dry run on the last round: {len(sheet)} bets", fh)
+            sheet = pd.DataFrame(columns=LEDGER_COLUMNS)
+            covers = f"{fx.date.min():%d %b} to {fx.date.max():%d %b}" if len(fx) else "no matches in our leagues"
+            data_warning = (data_warning + "; " if data_warning else "") + f"no upcoming fixtures in our leagues in the data (fixtures file covers {covers}) - the next round has not been published or downloaded yet"
+            sheet_run = "no sheet: no upcoming fixtures in the data yet"
+            log(f"NO SHEET: {data_warning}. Nothing is recorded (dry runs no longer go into the record of bets).", fh)
         # European fixtures in the window, priced with bet365 when the odds files are there, else DraftKings (ESPN)
         price_source = {}
         watch_rows = []
@@ -293,7 +367,10 @@ def main():
                 best = None
                 pick = sheet_pick.get(rec["match_id"])
                 for j, sel in enumerate(("home", "draw", "away")):
-                    bonus = float(f["bonus"][j]) * vcfg.early_payout_multiplier(float(f["p_market"][j]))
+                    if curve is not None:  # same measured early-payout curve as the domestic sheet
+                        bonus = float(curve(float(f["p_pool"][j]))) if sel != "draw" else 0.0
+                    else:
+                        bonus = float(f["bonus"][j]) * vcfg.early_payout_multiplier(float(f["p_market"][j]))
                     p_paid = min(float(f["p_pool"][j]) + bonus, 1.0)
                     min_odds = float(np.ceil(100.0 * (1.0 + args.margin) / round(p_paid, 4)) / 100.0)  # the price that returns the required value
                     cur = float(sn.prices[sel])
@@ -319,6 +396,7 @@ def main():
         sheet_run = "no sheet produced in this run"
         price_source = {}
         watch_rows = []
+        data_warning = ""
 
     # --- ledger: existing + new sheet, settle what has results ---------------------------------
     ledger_path = out / "ledger.csv"
@@ -335,6 +413,20 @@ def main():
     if args.mode in ("settle", "both"):
         n = led.settle(all_hist, all_odds)
         log(f"ledger: {n} bets settled", fh)
+    # closing-line value against the Betfair Exchange close (replaces the bet365-close figure wherever the close is known)
+    clv_ex = clv_vs_exchange(led.df, ex, curve, ep_leagues)
+    if len(clv_ex):
+        key = clv_ex.set_index(["match_id", "selection"])
+        for i, r in led.df.iterrows():
+            k = (r["match_id"], r["selection"])
+            if k in key.index:
+                led.df.loc[i, "closing_odds"] = float(key.loc[k, "closing_fair"])
+                led.df.loc[i, "clv"] = float(key.loc[k, "clv_ex"])
+        led.save()
+    settled_mask = led.df["settled"].astype(bool) if len(led.df) else pd.Series(dtype=bool)
+    test = verdict(led.df.loc[settled_mask & led.df["clv"].notna(), "clv"] if len(led.df) else pd.Series(dtype=float))
+    log(f"closing-line value vs the exchange close: {test['n']} bets, mean {test['mean']}, 95% lower bound {test['lower95']}, "
+        f"{test['share_positive']} positive -> {test['verdict']}", fh)
     rep = led.report()
     log("ledger report: " + ", ".join(f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}" for k, v in rep.items()), fh)
 
@@ -394,7 +486,7 @@ def main():
     if len(led.df):
         for r in led.df.to_dict("records"):
             doc_id = hashlib.sha1(f"{r['match_id']}|{r['selection']}".encode()).hexdigest()[:16]
-            kick = pd.Timestamp(r["date"])
+            kick = vienna(r["date"], r["league"])
             hg = ag = None
             if r["match_id"] in res_all.index:
                 x = res_all.loc[r["match_id"]]
@@ -430,7 +522,7 @@ def main():
     for r in watch_rows:
         if r["match_id"] in staked_ids:
             continue  # it made the sheet proper
-        kick = pd.Timestamp(r["date"])
+        kick = vienna(r["date"], r["league"])
         docs.append({
             "id": hashlib.sha1(f"{r['match_id']}|{r['selection']}|watch".encode()).hexdigest()[:16], "match_id": r["match_id"], "run_id": f"watch-{today}",
             "league": SHORT.get(r["league"], r["league"]), "league_code": r["league"], "kickoff": kick.strftime("%Y-%m-%dT%H:%M:00"), "day": kick.strftime("%Y-%m-%d"),
@@ -447,11 +539,33 @@ def main():
     status_doc = {"as_of": now.strftime("%Y-%m-%dT%H:%M:00"), "history_matches": int(len(all_hist)), "history_to": str(all_hist.date.max().date()),
                   "leagues_loaded": ", ".join(SHORT.get(l, l) for l in leagues) + (", " + uefa_loaded if uefa_loaded else ""),
                   "pool_weights": "; ".join(f"{SHORT.get(l, l)} {weights[l]:.3f}" for l in leagues) + (f"; Europe {UEFA_W:.3f} (set)" if len(u_hist) else ""),
-                  "uefa_prices": ("bet365" if len(b365) else "stand-in (DraftKings via ESPN) until the Odds API key is in the download script") if len(u_hist) else "not loaded",
+                  "uefa_prices": (("bet365" if (b365.bookmaker == "bet365").any() else "Pinnacle via The Odds API (it carries no bet365 prices)") if len(b365) else "stand-in (DraftKings via ESPN) until the Odds API key is in the download script") if len(u_hist) else "not loaded",
                   "fixtures_priced": int(len(live)), "fixtures_file_covers": f"{fx.date.min():%d %b} to {fx.date.max():%d %b}" if len(fx) else "no matches in our leagues",
                   "sheet_run": sheet_run, "bankroll": args.bankroll, "kelly": scfg.kelly_mode, "edge_margin": args.margin, "edge_metric": "ev", "max_odds": args.max_odds, "ep_scale": [vcfg.early_payout_scale, vcfg.early_payout_scale_favourite],
-                  "n_settled": int(rep.get("n_settled", 0))}
+                  "n_settled": int(rep.get("n_settled", 0)),
+                  "price_reference": "Betfair Exchange fair price (football-data.co.uk), early payout from the measured curve" if curve is not None else "model pooled with bet365",
+                  "ep_curve": curve.describe() if curve is not None else "", "data_warning": data_warning,
+                  "sheet_bets": int(len(sheet)) if args.mode in ("sheet", "both") else 0,
+                  "clv_n": test["n"], "clv_mean": test["mean"], "clv_lower95": test["lower95"], "clv_share_positive": test["share_positive"], "clv_verdict": test["verdict"]}
     json.dump(status_doc, open(out / "dash" / "status.json", "w"), indent=1)
+    # price card: every upcoming fixture with its exchange fair price and the minimum price worth taking
+    card_rows = []
+    if len(card):
+        for r in card.sort_values("date").to_dict("records"):
+            kick = vienna(r["date"], r["league"])
+            row = {"match_id": r["match_id"], "kickoff": kick.strftime("%Y-%m-%dT%H:%M:00"), "league": SHORT.get(r["league"], r["league"]),
+                   "match": f"{r['home']} – {r['away']}", "home": r["home"], "away": r["away"], "priced": bool(r.get("priced")), "pick": r.get("pick") or ""}
+            if r.get("priced"):
+                for s, key in (("home", "H"), ("draw", "D"), ("away", "A")):
+                    row[key] = {"p": r[f"p_{s}"], "fair": r[f"fair_{s}"], "min_b365": r[f"min_b365_{s}"], "b365": r[f"b365_{s}"], "min_other": r[f"min_other_{s}"],
+                              "best": r[f"max_{s}"], "offers": r[f"offers_{s}"], "ep": r[f"ep_{s}"]}
+            else:
+                row["note"] = r.get("note", "")
+            card_rows.append(row)
+    prices_doc = {"as_of": now.strftime("%Y-%m-%dT%H:%M:00"), "margin": args.margin, "max_odds": args.max_odds, "rows": card_rows,
+                  "explain": "H/D/A: fair = Betfair Exchange price without its margin. min_b365 = lowest bet365 price that still returns the required value "
+                             "(early payout included); min_other = the same at any other bookmaker (no early payout assumed)."}
+    json.dump(prices_doc, open(out / "dash" / "prices.json", "w"), indent=1, default=str)
     # Desk database write plan: one JSON file per document plus batch files (<= 50 writes each) for the ArtifactData tool.
     # New documents -> set; changed documents -> update (if_version filled from versions.json when given, else null).
     docs_dir = out / "dash" / "docs"
@@ -496,10 +610,14 @@ def main():
     json.dump(status_doc, open(docs_dir / "status.json", "w"), ensure_ascii=False)
     writes.append({"op": "set", "collection": "meta", "doc_id": "status", "file_path": str((docs_dir / "status.json").resolve()),
                    "if_version": versions.get("meta/status")})
+    if args.mode in ("sheet", "both"):
+        json.dump(prices_doc, open(docs_dir / "prices.json", "w"), ensure_ascii=False, default=str)
+        writes.append({"op": "set", "collection": "meta", "doc_id": "prices", "file_path": str((docs_dir / "prices.json").resolve()),
+                       "if_version": versions.get("meta/prices")})
     for i in range(0, len(writes), 50):
         json.dump(writes[i:i + 50], open(out / "dash" / f"db_batch_{i // 50 + 1}.json", "w"), indent=0)
-    n_set = sum(1 for w in writes if w["op"] == "set") - 1
-    n_upd = len(writes) - 1 - n_set
+    n_set = sum(1 for w in writes if w["op"] == "set" and w["collection"] == "bets")
+    n_upd = sum(1 for w in writes if w["op"] == "update" and w["collection"] == "bets")
     log(f"desk database: {n_set} new documents, {n_upd} to update (incl. expired watch entries), {max(len(docs) - n_set - n_upd, 0)} unchanged -> dash/db_batch_*.json "
         f"({(len(writes) + 49) // 50} batch file(s){'; fill in if_version from the listing' if not versions else ''})", fh)
     log(f"app documents: {len(docs)} bets ({sum(d['status'] == 'open' for d in docs)} open, {sum(d['status'] == 'watch' for d in docs)} to watch) -> dash/bets.json, dash/status.json", fh)

@@ -19,6 +19,15 @@ default since 22 Oct 2026); `kelly` quarter/half. The early-payout increment is 
 timelines, so domestic early payouts settle exactly. `underdog_check.py` + `underdog_report.py` reproduce the
 22 Oct 2026 analysis (walk-forward pricing of the whole history by odds band).
 
+**Pricing (since 23 Oct 2026)**: every domestic fixture is priced off the Betfair Exchange (football-data.co.uk
+`BFE*` columns, margin removed by the power method), not off the model: the walk-forward fit gives the model a weight of
+0.00-0.01 against the exchange. A bet365 home/away price qualifies when (exchange chance + early-payout chance) x price - 1
+clears `edge_margin`; the early-payout chance (led by two, did not win; about 2%) is a curve fitted every run on the
+goal timelines. `footquant/market/exchange.py` holds it. The run also writes a **price card** (`meta/prices`: every
+fixture, its fair price and the lowest price worth taking at bet365 and elsewhere) and measures closing-line value against
+the **exchange close**; `meta/status` carries the edge test (`clv_n`, `clv_mean`, `clv_lower95`, `clv_verdict`). When the
+fixtures file holds no upcoming matches the run records nothing and says why in `data_warning` (no more dry runs).
+
 Tuesday run = bet sheet for the midweek round (Tue-Thu). Friday run = settle midweek, bet sheet for the weekend.
 Monday run = settle the weekend. All use `--mode both`. European fixtures within 7 days are priced on every run.
 
@@ -37,7 +46,8 @@ Monday run = settle the weekend. All use `--mode both`. European fixtures within
 3. **Export the record of bets**: ArtifactData `list` collection `bets` with `query.limit` 1000 and
    `out_dir` `/home/claude/fq_docs` (page with `query.cursor` while `next_cursor` is returned). The listing shows every
    document's `version`: write them to `/home/claude/fq_docs/versions.json` as `{"<doc_id>": <version>, ...,
-   "meta/status": <version of meta/status from a get>}` (a small python heredoc is fine).
+   "meta/status": <version of meta/status from a get>, "meta/prices": <version of meta/prices from a get, if it exists>}`
+   (a small python heredoc is fine).
 4. **Run**: `pip install --break-system-packages numpy scipy pandas scikit-learn` if an import fails, then
    `python3 /home/claude/fq/live_run.py --data /home/claude/fq/data --out /home/claude/fq_out
    --settings /home/claude/fq_docs/settings.json --ledger-docs /home/claude/fq_docs --mode both`. The log says what happened (live sheet vs dry run, bets recorded,
@@ -55,6 +65,7 @@ Monday run = settle the weekend. All use `--mode both`. European fixtures within
 7. **Report** with SendUserMessage: the bet sheet as a table (date, league, match, bet on, odds, stake) — or
    "no bets this round" — plus, when European fixtures were priced from stand-in prices, one line saying how many are
    on the Desk's watch list waiting for a bet365 price; then one line on the ledger (bets settled, profit/loss, mean
-   price edge), ending with the Desk link. Nothing else.
+   price edge vs the exchange close), one line with the edge test verdict (`clv_verdict` in the status), and the
+   `data_warning` if there is one, ending with the Desk link. Nothing else.
 
 If the clone fails or the Desk cannot be read, send one line saying what failed and stop.
