@@ -605,8 +605,56 @@
    "away": "Roma",
    "kickoff_utc": "2026-10-24T16:00:00Z",
    "lineups": {
-    "confirmed": false,
-    "note": "line-ups not published yet"
+    "confirmed": true,
+    "taken_utc": "2026-10-24T15:17:29Z",
+    "home": {
+     "formation": "4-3-3",
+     "starters": [
+      "Alex Meret",
+      "Benoît Badiashile",
+      "Rafa Marín",
+      "Mathías Olivera",
+      "Giovanni Di Lorenzo",
+      "Frank Anguissa",
+      "Scott McTominay",
+      "Kevin De Bruyne",
+      "Rasmus Højlund",
+      "Noa Lang",
+      "Matteo Politano"
+     ],
+     "changes": 7,
+     "regulars_out": [
+      "Amir Rrahmani",
+      "Billy Gilmour",
+      "Leonardo Spinazzola",
+      "Stanislav Lobotka"
+     ],
+     "matches_compared": 3
+    },
+    "away": {
+     "formation": "3-5-2",
+     "starters": [
+      "Pierluigi Gollini",
+      "Evan Ndicka",
+      "Mario Hermoso",
+      "Gianluca Mancini",
+      "Niccolò Pisilli",
+      "Marten de Roon",
+      "Bryan Cristante",
+      "Wesley",
+      "Devyne Rensch",
+      "Donyell Malen",
+      "Matìas Soulè"
+     ],
+     "changes": 5,
+     "regulars_out": [
+      "Leonardo Balerdi",
+      "Manu Koné",
+      "Nahuel Molina",
+      "Paulo Dybala"
+     ],
+     "matches_compared": 3
+    }
    }
   },
   "GER-Bundesliga|2026-27|2026-10-24|Dortmund|Ein Frankfurt": {
@@ -641,7 +689,7 @@
   }
  },
  "last_call": {},
- "updated_utc": "2026-10-24T15:12:26Z",
+ "updated_utc": "2026-10-24T15:17:29Z",
  "credits_left": null,
  "odds_error": {
   "code": 401,
