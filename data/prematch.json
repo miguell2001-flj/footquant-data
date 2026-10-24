@@ -608,10 +608,40 @@
     "confirmed": false,
     "note": "line-ups not published yet"
    }
+  },
+  "GER-Bundesliga|2026-27|2026-10-24|Dortmund|Ein Frankfurt": {
+   "div": "D1",
+   "home": "Dortmund",
+   "away": "Ein Frankfurt",
+   "kickoff_utc": "2026-10-24T16:30:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
+  },
+  "ENG-Premier League|2026-27|2026-10-24|Chelsea|Tottenham": {
+   "div": "E0",
+   "home": "Chelsea",
+   "away": "Tottenham",
+   "kickoff_utc": "2026-10-24T16:30:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
+  },
+  "ESP-La Liga|2026-27|2026-10-24|Valencia|Villarreal": {
+   "div": "SP1",
+   "home": "Valencia",
+   "away": "Villarreal",
+   "kickoff_utc": "2026-10-24T16:30:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
   }
  },
  "last_call": {},
- "updated_utc": "2026-10-24T15:07:22Z",
+ "updated_utc": "2026-10-24T15:12:26Z",
  "credits_left": null,
  "odds_error": {
   "code": 401,
