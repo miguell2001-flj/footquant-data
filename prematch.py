@@ -50,6 +50,24 @@ def get(url: str, **params):
         return None
 
 
+def odds_get(sport: str, key: str, now: dt.datetime):
+    """One h2h snapshot from The Odds API: Betfair Exchange (EU) and Pinnacle. Falls back to the whole EU region (which
+    carries both) if the bookmaker filter is refused. Logs the status and the API's message on failure (never the key)."""
+    url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/"
+    for extra in ({"bookmakers": "betfair_ex_eu,pinnacle"}, {"regions": "eu"}):
+        try:
+            r = requests.get(url, params={"apiKey": key, "markets": "h2h", "oddsFormat": "decimal", **extra}, headers=UA, timeout=45)
+        except requests.RequestException as e:
+            log(f"FAILED    prices {sport}: {type(e).__name__}", now)
+            return None
+        if r.ok:
+            return r
+        log(f"FAILED    prices {sport} ({'bookmakers' if 'bookmakers' in extra else 'regions'}): HTTP {r.status_code} {r.text[:160]!r}", now)
+        if r.status_code not in (400, 422):
+            return None
+    return None
+
+
 def season_label(d: dt.date) -> str:
     y = d.year if d.month >= 7 else d.year - 1
     return f"{y}-{(y + 1) % 100:02d}"
@@ -196,17 +214,17 @@ def main() -> int:
     for div in leagues:
         if last_call.get(div, "") > (now - dt.timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ"):
             continue  # at most one call per league every 30 minutes, even if a fixture could not be matched
-        last_call[div] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         if not key:
             log("skip      prices (ODDS_KEY not set)", now)
             break
         if credits is not None and int(credits) < MIN_CREDITS:
             log(f"skip      prices ({credits} credits left, keeping {MIN_CREDITS} in reserve)", now)
             break
-        r = get(f"https://api.the-odds-api.com/v4/sports/{SPORT[div]}/odds/", apiKey=key, bookmakers="betfair_ex_eu,pinnacle", markets="h2h", oddsFormat="decimal")
+        r = odds_get(SPORT[div], key, now)
         if r is None:
-            log(f"FAILED    prices {div}", now)
+            changed = True  # keep the failure in the log
             continue
+        last_call[div] = now.strftime("%Y-%m-%dT%H:%M:%SZ")  # failed calls cost no credits, so only a success starts the 30-minute wait
         credits = r.headers.get("x-requests-remaining", credits)
         cands = {_norm(n): n for f in fx if f["div"] == div for n in (f["home"], f["away"])}
         n_ok = 0
@@ -218,6 +236,8 @@ def main() -> int:
                 continue
             entry = state["matches"].setdefault(f["match_id"], {"div": div, "home": f["home"], "away": f["away"], "kickoff_utc": f["ko"].strftime("%Y-%m-%dT%H:%M:%SZ")})
             for b in e.get("bookmakers", []):
+                if b.get("key") not in ("betfair_ex_eu", "pinnacle"):
+                    continue  # the regions fallback returns every EU bookmaker
                 mk = next((m for m in b.get("markets", []) if m["key"] == "h2h"), None)
                 if not mk:
                     continue
