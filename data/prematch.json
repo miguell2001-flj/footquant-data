@@ -663,8 +663,54 @@
    "away": "Ein Frankfurt",
    "kickoff_utc": "2026-10-24T16:30:00Z",
    "lineups": {
-    "confirmed": false,
-    "note": "line-ups not published yet"
+    "confirmed": true,
+    "taken_utc": "2026-10-24T15:47:52Z",
+    "home": {
+     "formation": "3-4-2-1",
+     "starters": [
+      "Gregor Kobel",
+      "Waldemar Anton",
+      "Ramy Bensebaini",
+      "Nico Schlotterbeck",
+      "Felix Nmecha",
+      "Marcel Sabitzer",
+      "Daniel Svensson",
+      "Julian Ryerson",
+      "Serhou Guirassy",
+      "Joey Veerman",
+      "Fábio Silva"
+     ],
+     "changes": 4,
+     "regulars_out": [
+      "Ethan Nwaneri",
+      "Jobe Bellingham",
+      "Kouakou Gadou",
+      "Maximilian Beier"
+     ],
+     "matches_compared": 3
+    },
+    "away": {
+     "formation": "4-4-2",
+     "starters": [
+      "Noah Atubolu",
+      "Lilian Brassier",
+      "Elias Baum",
+      "Nnamdi Collins",
+      "Robin Koch",
+      "Ritsu Doan",
+      "Farès Chaïbi",
+      "Noël Aséko",
+      "Raphael Onyedika",
+      "Younes Ebnoutalib",
+      "Jonathan Burkardt"
+     ],
+     "changes": 2,
+     "regulars_out": [
+      "Can Uzun",
+      "Keita Kosugi"
+     ],
+     "matches_compared": 3
+    }
    }
   },
   "ENG-Premier League|2026-27|2026-10-24|Chelsea|Tottenham": {
@@ -728,13 +774,60 @@
    "away": "Villarreal",
    "kickoff_utc": "2026-10-24T16:30:00Z",
    "lineups": {
-    "confirmed": false,
-    "note": "line-ups not published yet"
+    "confirmed": true,
+    "taken_utc": "2026-10-24T15:47:52Z",
+    "home": {
+     "formation": "4-4-2",
+     "starters": [
+      "Stole Dimitrievski",
+      "Justin de Haas",
+      "Pablo Maffeo",
+      "David Otorbi",
+      "Luis Rioja",
+      "Arnaut Danjuma",
+      "Guido Rodríguez",
+      "José Gayà",
+      "César Tárrega",
+      "Pepelu",
+      "Javier Guerra"
+     ],
+     "changes": 2,
+     "regulars_out": [
+      "Dani Raba",
+      "Filip Ugrinic",
+      "Hugo Duro"
+     ],
+     "matches_compared": 3
+    },
+    "away": {
+     "formation": "4-4-2",
+     "starters": [
+      "Péter Gulácsi",
+      "Santiago Mouriño",
+      "Renato Veiga",
+      "Alex Freeman",
+      "Juan Foyth",
+      "Ilias Akhomach",
+      "Pape Gueye",
+      "Carlos Macià",
+      "Tajon Buchanan",
+      "Gerard Moreno",
+      "Ayoze Pérez"
+     ],
+     "changes": 5,
+     "regulars_out": [
+      "Alberto Moleiro",
+      "Pau Navarro",
+      "Santi Comesaña",
+      "Sergi Cardona"
+     ],
+     "matches_compared": 3
+    }
    }
   }
  },
  "last_call": {},
- "updated_utc": "2026-10-24T15:42:49Z",
+ "updated_utc": "2026-10-24T15:47:52Z",
  "credits_left": null,
  "odds_error": {
   "code": 401,
