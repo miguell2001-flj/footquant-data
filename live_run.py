@@ -486,8 +486,12 @@ def main():
             led.save()
             log(f"ledger: {len(withdrawn)} open pick(s) from an earlier run withdrawn (they no longer pass the rules in force)", fh)
     if len(sheet):
-        n_new = led.append(sheet)
-        log(f"ledger: {n_new} new bets recorded", fh)
+        # a pick first made less than an hour before its kick-off is not recorded: there is no time to place it, and it
+        # would only blur the paper record (earlier picks on such matches are already in the ledger and stay there)
+        soon = [vienna(d_, l_) <= now + pd.Timedelta(minutes=60) for d_, l_ in zip(sheet["date"], sheet["league"])] if "date" in sheet else [False] * len(sheet)
+        n_soon = int(sum(soon))
+        n_new = led.append(sheet[[not x for x in soon]])
+        log(f"ledger: {n_new} new bets recorded" + (f" ({n_soon} pick(s) on matches starting within the hour left out)" if n_soon else ""), fh)
     if args.mode in ("settle", "both"):
         n = led.settle(all_hist, all_odds)
         log(f"ledger: {n} bets settled", fh)
@@ -635,6 +639,20 @@ def main():
                 slip_writes[sid] = ("update", {**st_, "settled_at": now.strftime("%Y-%m-%dT%H:%M:00")})
                 old_slips[sid] = {**sl, **st_}
                 n_slip_settled += 1
+    new_sids = set()
+    for x in new_slips:
+        new_sids.add(hashlib.sha1((f"{x['run_id']}|{x['pot']}|{x['kind']}|" + "|".join(l["match_id"] + l["selection"] for l in x["legs"])).encode()).hexdigest()[:16])
+    if args.mode in ("sheet", "both") and len(live):
+        # a later run in the same round replaces an earlier run's open slips that were not placed and have not started:
+        # this run's slips are the ones built on the current prices and rules (a placed slip is never touched)
+        n_rep = 0
+        for sid, sl in list(old_slips.items()):
+            if sl.get("status") == "open" and not sl.get("placed") and sid not in new_sids and str(sl.get("first_kickoff", "")) > now.strftime("%Y-%m-%dT%H:%M:00"):
+                slip_writes[sid] = ("update", {"status": "withdrawn", "note": "replaced by a later run before kick-off"})
+                old_slips[sid] = {**sl, "status": "withdrawn"}
+                n_rep += 1
+        if n_rep:
+            log(f"slips: {n_rep} unplaced open slip(s) from an earlier run withdrawn (replaced by this run's slips)", fh)
     for x in new_slips:
         sid = hashlib.sha1((f"{x['run_id']}|{x['pot']}|{x['kind']}|" + "|".join(l["match_id"] + l["selection"] for l in x["legs"])).encode()).hexdigest()[:16]
         if sid in old_slips:
