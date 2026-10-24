@@ -8,7 +8,7 @@ Everything runs in the cloud. Nothing needs Miguel's PC.
   (bet365 prices for Europe).
 - **Footquant Desk** https://claude.ai/artifact/AsJiY8k7sHYWsq2Z3ZTc6X is the product and the record of bets. Its database
   (ArtifactData tool, `url` = that link) holds: collection `bets` (one document per suggestion, id = the `id` in
-  `out/dash/bets.json`), document `meta/status`, document `settings/main` (`bankroll`).
+  `out/dash/bets.json`), collection `slips`, documents `meta/status`, `meta/prices` and `settings/main` (the rules).
 - **Drive folder** `footquant` (Google Drive connector, folder id `1DTJnbFDnXxgq1gJk1chs7Q9fB3eApmKp`): a copy of the
   run outputs for Miguel to look at. Optional; never read from it.
 
@@ -34,6 +34,19 @@ Kelly-sized on the combined price, and the fun-pot fold (`fun_legs` = 6 shortest
 staked `fun_pot` = EUR 10 whatever the value). Slips only use legs starting at least an hour after the run. Every run
 settles open slips (early payout counted on each leg). If the rules change before kick-off, an earlier run's open,
 unplaced single that no longer passes is set to `status: "withdrawn"`.
+
+**Comeback term (since 24 Oct 2026)**: the early-payout curve has a fourth term, the opponent's record of coming back
+from two goals down ((came back + 1) / (trailed by two + 10), from earlier matches only, standardised and capped at
++-2). `meta/status.ep_curve_params` carries the fitted coefficients and every price-card side carries its `z`, so the
+Desk can re-price with the same curve. Goal-minute study: odds ratio about 1.3 per standard deviation; a team's own
+scoring timing showed no effect. `tests/test_comeback.py` checks it.
+
+**Pre-kick-off check (since 24 Oct 2026)**: the workflow `prematch.yml` runs `prematch.py` every 15 minutes. For big-5
+matches starting within 80 minutes it writes `data/prematch.json` (keyed by the model's `match_id`): the confirmed
+line-ups from ESPN (changes since the last match, regulars out) and one Betfair Exchange + Pinnacle snapshot per league
+taken 15-55 minutes before kick-off (The Odds API, about 1 credit a call, never below 40 credits left). The Desk's
+**Kick-off check** reads that file through the viewer's Firecrawl connector and re-prices each open pick and slip leg.
+Scheduled runs do not touch this; if `data/prematch.log` stops growing on match days, mention it in the report.
 
 Tuesday run = bet sheet for the midweek round (Tue-Thu). Friday run = settle midweek, bet sheet for the weekend.
 Monday run = settle the weekend. All use `--mode both`. European fixtures within 7 days are priced on every run.
