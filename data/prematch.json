@@ -558,6 +558,12 @@
   }
  },
  "last_call": {},
- "updated_utc": "2026-10-24T13:06:14Z",
- "credits_left": null
+ "updated_utc": "2026-10-24T13:11:19Z",
+ "credits_left": null,
+ "odds_error": {
+  "code": 401,
+  "message": "The Odds API rejected the key",
+  "at": "2026-10-24T13:11:19Z",
+  "key_id": "7add7c16b8"
+ }
 }
