@@ -844,10 +844,20 @@
     "confirmed": false,
     "note": "line-ups not published yet"
    }
+  },
+  "ESP-La Liga|2026-27|2026-10-24|Ath Madrid|La Coruna": {
+   "div": "SP1",
+   "home": "Ath Madrid",
+   "away": "La Coruna",
+   "kickoff_utc": "2026-10-24T19:00:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "match not found on ESPN"
+   }
   }
  },
  "last_call": {},
- "updated_utc": "2026-10-24T17:38:40Z",
+ "updated_utc": "2026-10-24T17:43:44Z",
  "credits_left": null,
  "odds_error": {
   "code": 401,
