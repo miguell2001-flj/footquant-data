@@ -5,7 +5,10 @@ Writes into data/:
   uefa_espn.csv                                                                     Champions / Europa / Conference League results,
                                                                                     goal timelines and fixtures (ESPN scoreboard)
   domestic_espn.csv                                                                 the five leagues' results and goal timelines
-                                                                                    (ESPN scoreboard) for the early-payout check
+                                                                                    (ESPN scoreboard) for the early-payout check:
+                                                                                    largest lead per side, the goal sequence with
+                                                                                    minutes ("12H;34A") and the minute each side
+                                                                                    first led by two
   odds_<sport>.json                                                                 bet365 prices for the European fixtures
                                                                                     (The Odds API; only when the ODDS_KEY secret is set
                                                                                     and a European match is within the next 4 days)
@@ -91,14 +94,27 @@ def months_all(first: dt.date, last: dt.date) -> list[str]:
 DOMESTIC = [("eng.1", "E0"), ("esp.1", "SP1"), ("ita.1", "I1"), ("ger.1", "D1"), ("fra.1", "F1")]
 
 
+def minute(clock: dict) -> int | str:
+    """Match minute of an event: from displayValue ("45'+2'" -> 47), else from the clock in seconds."""
+    disp = str((clock or {}).get("displayValue") or "").replace("'", " ").replace("+", " ").split()
+    try:
+        return sum(int(float(x)) for x in disp[:2]) if disp else int(float((clock or {}).get("value", 0)) // 60) + 1
+    except ValueError:
+        return ""
+
+
 def max_leads(details: list, home_id: str, hs: int, as_: int):
+    """Largest lead of each side, the goal sequence ("12H;34A;81H", minute + scoring side) and the minute each side
+    first led by two ("" if never). Own goals are tried both ways round: the version that reproduces the score wins."""
     goals = sorted(
-        ({"clk": (d.get("clock") or {}).get("value", 0), "team": str((d.get("team") or {}).get("id", "")), "og": bool(d.get("ownGoal"))}
+        ({"clk": (d.get("clock") or {}).get("value", 0), "min": minute(d.get("clock") or {}), "team": str((d.get("team") or {}).get("id", "")),
+          "og": bool(d.get("ownGoal"))}
          for d in details if d.get("scoringPlay")),
         key=lambda g: g["clk"])
 
     def run(flip: bool):
         h = a = mh = ma = 0
+        seq, h2, a2 = [], "", ""
         for g in goals:
             for_home = g["team"] == home_id
             if g["og"] and flip:
@@ -107,14 +123,19 @@ def max_leads(details: list, home_id: str, hs: int, as_: int):
                 h += 1
             else:
                 a += 1
+            seq.append(f"{g['min']}{'H' if for_home else 'A'}")
+            if h - a >= 2 and h2 == "":
+                h2 = g["min"]
+            if a - h >= 2 and a2 == "":
+                a2 = g["min"]
             mh, ma = max(mh, h - a), max(ma, a - h)
-        return h, a, mh, ma
+        return h, a, mh, ma, ";".join(seq), h2, a2
 
     for flip in (False, True):
-        h, a, mh, ma = run(flip)
+        h, a, mh, ma, seq, h2, a2 = run(flip)
         if (h, a) == (hs, as_):
-            return mh, ma, 1
-    return "", "", 0
+            return mh, ma, 1, seq, h2, a2
+    return "", "", 0, "", "", ""
 
 
 def fetch_espn(first: dt.date, last: dt.date, comps: list[tuple[str, str]] | None = None, skip_summer: bool = True) -> list[dict]:
@@ -135,10 +156,10 @@ def fetch_espn(first: dt.date, last: dt.date, comps: list[tuple[str, str]] | Non
                 if not h or not a:
                     continue
                 st = e["status"]["type"]["name"]
-                hml = aml = ok = ""
+                hml = aml = ok = seq = h2 = a2 = ""
                 hs, as_ = h.get("score"), a.get("score")
                 if st in FINAL and hs not in (None, "") and as_ not in (None, ""):
-                    hml, aml, ok = max_leads(c.get("details") or [], str(h["team"]["id"]), int(float(hs)), int(float(as_)))
+                    hml, aml, ok, seq, h2, a2 = max_leads(c.get("details") or [], str(h["team"]["id"]), int(float(hs)), int(float(as_)))
                 o = next((x for x in (c.get("odds") or []) if x and x.get("moneyline")), None)
 
                 def ml(k):
@@ -148,7 +169,7 @@ def fetch_espn(first: dt.date, last: dt.date, comps: list[tuple[str, str]] | Non
                     "comp": code, "season": (e.get("season") or {}).get("year", ""), "event_id": e.get("id"), "date_utc": e.get("date"),
                     "status": st, "neutral": 1 if c.get("neutralSite") else 0, "home_id": h["team"]["id"], "home": h["team"]["displayName"],
                     "away_id": a["team"]["id"], "away": a["team"]["displayName"], "hs": hs, "as": as_, "home_max_lead": hml, "away_max_lead": aml,
-                    "timeline_ok": ok, "odds_provider": ((o or {}).get("provider") or {}).get("name", "") if o else "",
+                    "timeline_ok": ok, "goals": seq, "home_lead2_min": h2, "away_lead2_min": a2, "odds_provider": ((o or {}).get("provider") or {}).get("name", "") if o else "",
                     "ml_h": ml("home"), "ml_d": ml("draw"), "ml_a": ml("away"),
                 })
             time.sleep(0.3)
@@ -158,7 +179,7 @@ def fetch_espn(first: dt.date, last: dt.date, comps: list[tuple[str, str]] | Non
 
 def write_espn(rows: list[dict], name: str = "uefa_espn.csv", minimum: int = 500) -> None:
     cols = ["comp", "season", "event_id", "date_utc", "status", "neutral", "home_id", "home", "away_id", "away", "hs", "as",
-            "home_max_lead", "away_max_lead", "timeline_ok", "odds_provider", "ml_h", "ml_d", "ml_a"]
+            "home_max_lead", "away_max_lead", "timeline_ok", "goals", "home_lead2_min", "away_lead2_min", "odds_provider", "ml_h", "ml_d", "ml_a"]
     if len(rows) < minimum:  # a broken fetch must not wipe the file
         log(f"KEPT    {name} (only {len(rows)} events fetched)")
         return

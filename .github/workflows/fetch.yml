@@ -5,6 +5,9 @@ on:
     - cron: "20 6 * * *"    # 08:20 Vienna in summer, 07:20 in winter
     - cron: "20 13 * * *"   # 15:20 / 14:20 — catches same-day European prices
   workflow_dispatch:
+  push:                     # a change to the fetch itself takes effect at once
+    branches: [main]
+    paths: [fetch.py, .github/workflows/fetch.yml]
 
 permissions:
   contents: write
