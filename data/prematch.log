@@ -8,3 +8,7 @@
 2026-10-24T13:01:00Z  line-ups  Paderborn - Hamburg: changes 0/2, regulars out Marvin Pieringer / Albert Sambi Lokonga, Louis Lemke, Nicolai Remberg, Nicolás Capaldo
 2026-10-24T13:01:00Z  line-ups  RB Leipzig - Elversberg: changes 6/1, regulars out Brajan Gruda, Castello Lukeba, Christopher Nkunku, David Raum, Maarten Vandevoordt, Ridle Baku, Rômulo / Noah Darvich
 2026-10-24T13:01:00Z  FAILED    prices soccer_germany_bundesliga (bookmakers): HTTP 401 '{"message":"API key is not valid. Get an API key at https://the-odds-api.com","error_code":"INVALID_KEY","details_url":"https://the-odds-api.com/liveapi/guides/'
+2026-10-24T13:06:14Z  line-ups  Arsenal - Everton: changes 4/3, regulars out Bruno Guimarães, Bukayo Saka, Kai Havertz, Riccardo Calafiori / Ainsley Maitland-Niles, Jack Grealish, Jarrad Branthwaite
+2026-10-24T13:06:14Z  line-ups  Coventry - Fulham: changes 0/1, regulars out Ephron Mason-Clark / Sander Berge
+2026-10-24T13:06:14Z  FAILED    prices soccer_germany_bundesliga (bookmakers): HTTP 401 '{"message":"API key is not valid. Get an API key at https://the-odds-api.com","error_code":"INVALID_KEY","details_url":"https://the-odds-api.com/liveapi/guides/'
+2026-10-24T13:06:14Z  FAILED    prices soccer_epl (bookmakers): HTTP 401 '{"message":"API key is not valid. Get an API key at https://the-odds-api.com","error_code":"INVALID_KEY","details_url":"https://the-odds-api.com/liveapi/guides/'
