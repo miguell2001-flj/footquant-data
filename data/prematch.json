@@ -1,0 +1,77 @@
+{
+ "matches": {
+  "ITA-Serie A|2026-27|2026-10-24|Cagliari|Bologna": {
+   "div": "I1",
+   "home": "Cagliari",
+   "away": "Bologna",
+   "kickoff_utc": "2026-10-24T13:00:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
+  },
+  "ITA-Serie A|2026-27|2026-10-24|Como|Sassuolo": {
+   "div": "I1",
+   "home": "Como",
+   "away": "Sassuolo",
+   "kickoff_utc": "2026-10-24T13:00:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
+  },
+  "ESP-La Liga|2026-27|2026-10-24|Vallecano|Elche": {
+   "div": "SP1",
+   "home": "Vallecano",
+   "away": "Elche",
+   "kickoff_utc": "2026-10-24T12:00:00Z",
+   "lineups": {
+    "confirmed": true,
+    "taken_utc": "2026-10-24T11:51:09Z",
+    "home": {
+     "formation": "4-3-3",
+     "starters": [
+      "Emil Audero",
+      "Mujaid Sadick",
+      "Florian Lejeune",
+      "Adrià Pedrosa",
+      "Iván Balliu",
+      "Pathé Ciss",
+      "Unai López",
+      "Pedro Díaz",
+      "Sergio Camello",
+      "Álvaro García",
+      "Jorge de Frutos"
+     ],
+     "changes": 1,
+     "regulars_out": [],
+     "matches_compared": 3
+    },
+    "away": {
+     "formation": "4-3-3",
+     "starters": [
+      "Matías Dituro",
+      "Víctor Chust",
+      "Federico Redondo",
+      "Roy Revivo",
+      "Buba Sangaré",
+      "Javier Morcillo",
+      "Thomas Lemar",
+      "Gonzalo Villar",
+      "Fer Niño",
+      "Germán Valera",
+      "Lucas Cepeda"
+     ],
+     "changes": 2,
+     "regulars_out": [
+      "Marc Aguado"
+     ],
+     "matches_compared": 3
+    }
+   }
+  }
+ },
+ "last_call": {},
+ "updated_utc": "2026-10-24T11:51:09Z",
+ "credits_left": null
+}
