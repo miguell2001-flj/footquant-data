@@ -113,3 +113,20 @@
 2026-10-24T11:35:40Z  ok      ESPN F1: 690 events
 2026-10-24T11:35:40Z  ok      domestic_espn.csv  3938 events
 2026-10-24T11:35:40Z  skip    odds (no European match in the next 4 days; saves the monthly quota)
+2026-10-24T11:45:45Z  ok      E0_2627.csv  34516 bytes
+2026-10-24T11:45:46Z  ok      SP1_2627.csv  42704 bytes
+2026-10-24T11:45:47Z  ok      I1_2627.csv  33436 bytes
+2026-10-24T11:45:48Z  ok      D1_2627.csv  26278 bytes
+2026-10-24T11:45:50Z  ok      F1_2627.csv  30374 bytes
+2026-10-24T11:45:51Z  ok      fixtures.csv  54847 bytes
+2026-10-24T11:46:02Z  ok      ESPN UCL: 522 events
+2026-10-24T11:46:12Z  ok      ESPN UEL: 522 events
+2026-10-24T11:46:22Z  ok      ESPN UECL: 414 events
+2026-10-24T11:46:22Z  ok      uefa_espn.csv  1458 events
+2026-10-24T11:46:33Z  ok      ESPN E0: 848 events
+2026-10-24T11:46:44Z  ok      ESPN SP1: 865 events
+2026-10-24T11:46:55Z  ok      ESPN I1: 853 events
+2026-10-24T11:47:06Z  ok      ESPN D1: 682 events
+2026-10-24T11:47:17Z  ok      ESPN F1: 690 events
+2026-10-24T11:47:17Z  ok      domestic_espn.csv  3938 events
+2026-10-24T11:47:17Z  skip    odds (no European match in the next 4 days; saves the monthly quota)
