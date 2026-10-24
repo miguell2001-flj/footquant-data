@@ -80,53 +80,100 @@ def exchange_table(path: str | Path, league, season: str, aliases: dict[str, str
     return out.reset_index(drop=True)
 
 
+Z_CAP = 2.0  # the opponent-comeback term is capped at two standard deviations either way
+
+
 @dataclass
 class EpCurve:
-    """P(team led by two at some point and did not win) as a smooth function of its fair win probability:
-    logistic in (1, logit p, logit p^2), fitted on matches with a known goal timeline."""
+    """P(team led by two at some point and did not win) as a smooth function of its fair win probability and of the
+    OPPONENT's record of coming back from two goals down: logistic in (1, logit p, logit p^2, z), where z is the
+    opponent's shrunk comeback rate standardised and capped at +-2. Fitted on matches with a known goal timeline.
+    Goal-minute study, 24 Oct 2026 (5,699 sides, 120 cases): odds ratio 1.27 per standard deviation of the
+    opponent's record (z = 3.0), positive in all three seasons; the team's own timing showed no effect."""
     coef: np.ndarray
     n: int
+    z_mu: float = 0.0
+    z_sd: float = 1.0
 
     @staticmethod
-    def _x(p):
+    def _x(p, z=None):
         p = np.clip(np.asarray(p, dtype=float), 1e-4, 1 - 1e-4)
         lg = np.log(p / (1 - p))
-        return np.stack([np.ones_like(lg), lg, lg * lg], axis=-1)
+        z = np.zeros_like(lg) if z is None else np.broadcast_to(np.asarray(z, dtype=float), lg.shape)
+        return np.stack([np.ones_like(lg), lg, lg * lg, np.clip(np.nan_to_num(z), -Z_CAP, Z_CAP)], axis=-1)
+
+    def zscore(self, rate):
+        """Opponent's shrunk comeback rate -> the capped z the curve uses (unknown team -> 0)."""
+        if rate is None or not np.isfinite(rate):
+            return 0.0
+        return float(np.clip((rate - self.z_mu) / self.z_sd, -Z_CAP, Z_CAP))
 
     @classmethod
-    def fit(cls, p, ep_event) -> "EpCurve":
+    def fit(cls, p, ep_event, opp_rate=None) -> "EpCurve":
         p, y = np.asarray(p, float), np.asarray(ep_event, float)
+        r = np.full_like(p, np.nan) if opp_rate is None else np.asarray(opp_rate, float)
         ok = np.isfinite(p) & np.isfinite(y)
-        a, y = cls._x(p[ok]), y[ok]
+        mu = float(np.nanmean(r[ok])) if np.isfinite(r[ok]).any() else 0.0
+        sd = float(np.nanstd(r[ok])) if np.isfinite(r[ok]).sum() > 1 else 1.0
+        z = np.where(np.isfinite(r), (r - mu) / (sd or 1.0), 0.0)
+        a, y = cls._x(p[ok], z[ok]), y[ok]
 
         def nll(b):
-            z = a @ b
-            return -np.sum(y * z - np.logaddexp(0, z)) + 5e-4 * np.sum(b[1:] ** 2)
+            zz = a @ b
+            return -np.sum(y * zz - np.logaddexp(0, zz)) + 5e-4 * np.sum(b[1:] ** 2)
 
-        return cls(minimize(nll, np.array([-4.0, 0.0, 0.0]), method="BFGS").x, int(ok.sum()))
+        return cls(minimize(nll, np.array([-4.0, 0.0, 0.0, 0.0]), method="BFGS").x, int(ok.sum()), mu, sd or 1.0)
 
-    def __call__(self, p):
-        return 1.0 / (1.0 + np.exp(-(self._x(p) @ self.coef)))
+    def __call__(self, p, z=0.0):
+        return 1.0 / (1.0 + np.exp(-(self._x(p, z) @ self.coef)))
 
     def describe(self) -> str:
-        return ", ".join(f"{int(q * 100)}% -> {float(self(q)):.1%}" for q in (0.2, 0.4, 0.6, 0.8))
+        base = ", ".join(f"{int(q * 100)}% -> {float(self(q)):.1%}" for q in (0.2, 0.4, 0.6, 0.8))
+        return f"{base}; against an opponent with a strong comeback record (+1 sd) x{float(np.exp(self.coef[3])):.2f}"
+
+    def as_dict(self) -> dict:
+        return {"coef": [round(float(c), 6) for c in self.coef], "z_mu": round(self.z_mu, 6), "z_sd": round(self.z_sd, 6), "z_cap": Z_CAP}
+
+
+def comeback_rates(hist: pd.DataFrame, lead: int = 2) -> tuple[dict, dict]:
+    """Each team's record of coming back from `lead` goals down (trailed by two at some point and did not lose),
+    shrunk toward 10%: (came back + 1) / (trailed by two + 10).
+    Returns (prior, now): prior[(match_id, team)] = the rate from that team's matches strictly before this one (for
+    fitting without look-ahead); now[team] = the rate from all its matches (for pricing upcoming fixtures)."""
+    h = hist[hist["home_max_lead"].notna()].sort_values("date")
+    tally, prior = {}, {}
+    for r in h.itertuples(index=False):
+        for team, opp_lead, lost in ((r.home, r.away_max_lead, r.away_goals > r.home_goals), (r.away, r.home_max_lead, r.home_goals > r.away_goals)):
+            c, t = tally.get(team, (0, 0))
+            prior[(r.match_id, team)] = (c + 1) / (t + 10)
+        for team, opp_lead, lost in ((r.home, r.away_max_lead, r.away_goals > r.home_goals), (r.away, r.home_max_lead, r.home_goals > r.away_goals)):
+            c, t = tally.get(team, (0, 0))
+            if opp_lead >= lead:
+                tally[team] = (c + (0 if lost else 1), t + 1)
+            else:
+                tally[team] = (c, t)
+    now = {team: (c + 1) / (t + 10) for team, (c, t) in tally.items()}
+    return prior, now
 
 
 def ep_events(hist: pd.DataFrame, ex: pd.DataFrame, lead: int = 2) -> pd.DataFrame:
-    """Home and away sides with a goal timeline and an exchange price: fair p before kick-off, and whether the
-    side reached a `lead`-goal lead and did not win (the case only the early payout pays)."""
+    """Home and away sides with a goal timeline and an exchange price: fair p before kick-off, whether the side
+    reached a `lead`-goal lead and did not win (the case only the early payout pays), and the opponent's comeback
+    record from its earlier matches."""
+    prior, _ = comeback_rates(hist, lead)
     m = hist.merge(ex[["match_id", "fx_home", "fx_away"]], on="match_id", how="inner")
     m = m[m["home_max_lead"].notna() & m["fx_home"].notna()]
     rows = []
     for s, o in (("home", "away"), ("away", "home")):
         won = m[f"{s}_goals"] > m[f"{o}_goals"]
-        rows.append(pd.DataFrame({"p": m[f"fx_{s}"].values, "ep": ((m[f"{s}_max_lead"] >= lead) & ~won).astype(float).values}))
+        rows.append(pd.DataFrame({"p": m[f"fx_{s}"].values, "ep": ((m[f"{s}_max_lead"] >= lead) & ~won).astype(float).values,
+                                  "opp_rate": [prior.get((mid, t), np.nan) for mid, t in zip(m["match_id"], m[o])]}))
     return pd.concat(rows, ignore_index=True)
 
 
 def screen(fixtures: pd.DataFrame, ex: pd.DataFrame, curve: EpCurve, margin: float, bankroll: float, kelly_mult: float,
            max_odds: float | None, ep_leagues, run_id: str, placed_at: str, max_stake_frac: float = 0.05,
-           round_to: float = 0.5, w_model: dict | None = None, p_model: dict | None = None):
+           round_to: float = 0.5, w_model: dict | None = None, p_model: dict | None = None, opp_rate: dict | None = None):
     """Price every fixture off the exchange.
 
     Returns (bets, card): `bets` are LEDGER rows for the bet365 selections that clear `margin` (one per match, the
@@ -152,8 +199,10 @@ def screen(fixtures: pd.DataFrame, ex: pd.DataFrame, curve: EpCurve, margin: flo
         eligible = r["league"] in ep_leagues
         row = {"match_id": r["match_id"], "date": r["date"], "league": r["league"], "home": r["home"], "away": r["away"], "priced": True}
         best = None
+        zs = {"home": curve.zscore((opp_rate or {}).get(r["away"])), "away": curve.zscore((opp_rate or {}).get(r["home"])), "draw": 0.0}
         for j, s in enumerate(SELS):
-            ep = float(curve(p[j])) if eligible and s != "draw" else 0.0
+            ep = float(curve(p[j], zs[s])) if eligible and s != "draw" else 0.0
+            row[f"z_{s}"] = round(zs[s], 3)
             p_paid = min(p[j] + ep, 1.0)
             o365 = r.get(f"B365_{s}")
             row[f"fair_{s}"] = round(1.0 / p[j], 2)
@@ -194,19 +243,21 @@ def screen(fixtures: pd.DataFrame, ex: pd.DataFrame, curve: EpCurve, margin: flo
     return pd.DataFrame(bets, columns=LEDGER_COLUMNS), pd.DataFrame(card)
 
 
-def clv_vs_exchange(ledger: pd.DataFrame, ex: pd.DataFrame, curve: EpCurve | None, ep_leagues) -> pd.DataFrame:
+def clv_vs_exchange(ledger: pd.DataFrame, ex: pd.DataFrame, curve: EpCurve | None, ep_leagues, opp_rate: dict | None = None) -> pd.DataFrame:
     """Closing-line value against the exchange close: expected return per euro of the price taken if the close
     is the truth (early payout included for bet365 home/away bets). Returns match_id, selection, closing fair
     price, clv for every ledger row with an exchange close."""
     if len(ledger) == 0 or "fc_home" not in ex.columns:
         return pd.DataFrame(columns=["match_id", "selection", "closing_fair", "clv_ex"])
-    m = ledger[["match_id", "selection", "odds", "league", "ep_bonus"]].merge(ex[["match_id", "fc_home", "fc_draw", "fc_away"]], on="match_id", how="inner")
+    m = ledger[["match_id", "selection", "odds", "league", "ep_bonus", "home", "away"]].merge(ex[["match_id", "fc_home", "fc_draw", "fc_away"]], on="match_id", how="inner")
     out = []
     for r in m.to_dict("records"):
         pc = r.get(f"fc_{r['selection']}")
         if pc is None or not np.isfinite(pc):
             continue
-        ep = float(curve(pc)) if curve is not None and r["selection"] != "draw" and r["league"] in ep_leagues and float(r.get("ep_bonus") or 0) > 0 else 0.0
+        opp = r["away"] if r["selection"] == "home" else r["home"]
+        z = curve.zscore((opp_rate or {}).get(opp)) if curve is not None else 0.0
+        ep = float(curve(pc, z)) if curve is not None and r["selection"] != "draw" and r["league"] in ep_leagues and float(r.get("ep_bonus") or 0) > 0 else 0.0
         out.append({"match_id": r["match_id"], "selection": r["selection"], "closing_fair": round(1.0 / pc, 3), "clv_ex": (pc + ep) * float(r["odds"]) - 1.0})
     return pd.DataFrame(out, columns=["match_id", "selection", "closing_fair", "clv_ex"])
 

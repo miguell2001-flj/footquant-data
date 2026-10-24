@@ -33,7 +33,7 @@ from footquant.market.devig import devig  # noqa: E402
 from footquant.market.odds_feed import snapshots_from_frame  # noqa: E402
 from footquant.models.dixon_coles import DixonColesModel  # noqa: E402
 from footquant.paper_trading import Ledger, make_bet_sheet, pooled_fixture  # noqa: E402
-from footquant.market.exchange import EpCurve, build_slips, clv_vs_exchange, ep_events, exchange_table, screen, settle_slip, verdict  # noqa: E402
+from footquant.market.exchange import EpCurve, build_slips, clv_vs_exchange, comeback_rates, ep_events, exchange_table, screen, settle_slip, verdict  # noqa: E402
 from footquant.config import DEFAULT_EARLY_PAYOUT_COMPETITIONS  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -203,10 +203,12 @@ def main():
     ex = load_exchange(data)
     ep_leagues = DEFAULT_EARLY_PAYOUT_COMPETITIONS
     curve = None
+    opp_rate = {}
     if "fx_home" in ex.columns and "home_max_lead" in hist.columns:
         ev_rows = ep_events(hist, ex)
+        _, opp_rate = comeback_rates(hist)
         if len(ev_rows) >= 500:
-            curve = EpCurve.fit(ev_rows.p, ev_rows.ep)
+            curve = EpCurve.fit(ev_rows.p, ev_rows.ep, ev_rows.opp_rate)
             log(f"exchange prices for {int(ex.fx_home.notna().sum())} of {len(ex)} matches; early-payout curve from {curve.n} sides "
                 f"(led by two, did not win: {ev_rows.ep.mean():.1%} overall; by fair win chance {curve.describe()})", fh)
     if curve is None:
@@ -324,7 +326,7 @@ def main():
             have_ex = live.match_id.isin(fex.loc[fex["fx_home"].notna(), "match_id"]) if (curve is not None and "fx_home" in fex.columns) else pd.Series(False, index=live.index)
             if have_ex.any():
                 b, card = screen(live[have_ex], fex, curve, args.margin, args.bankroll, scfg.kelly_fraction, args.max_odds, ep_leagues,
-                                 run_id, placed_at, max_stake_frac=scfg.max_stake_frac, round_to=scfg.round_to)
+                                 run_id, placed_at, max_stake_frac=scfg.max_stake_frac, round_to=scfg.round_to, opp_rate=opp_rate)
                 frames.append(b)
                 if args.max_odds:
                     n_more = int(sum(1 for r in card.to_dict("records") if r.get("priced") and not r.get("pick") and any(
@@ -391,7 +393,8 @@ def main():
                 pick = sheet_pick.get(rec["match_id"])
                 for j, sel in enumerate(("home", "draw", "away")):
                     if curve is not None:  # same measured early-payout curve as the domestic sheet
-                        bonus = float(curve(float(f["p_pool"][j]))) if sel != "draw" else 0.0
+                        opp = rec["away"] if sel == "home" else rec["home"]
+                        bonus = float(curve(float(f["p_pool"][j]), curve.zscore(opp_rate.get(opp)))) if sel != "draw" else 0.0
                     else:
                         bonus = float(f["bonus"][j]) * vcfg.early_payout_multiplier(float(f["p_market"][j]))
                     p_paid = min(float(f["p_pool"][j]) + bonus, 1.0)
@@ -489,7 +492,7 @@ def main():
         n = led.settle(all_hist, all_odds)
         log(f"ledger: {n} bets settled", fh)
     # closing-line value against the Betfair Exchange close (replaces the bet365-close figure wherever the close is known)
-    clv_ex = clv_vs_exchange(led.df, ex, curve, ep_leagues)
+    clv_ex = clv_vs_exchange(led.df, ex, curve, ep_leagues, opp_rate)
     if len(clv_ex):
         key = clv_ex.set_index(["match_id", "selection"])
         for i, r in led.df.iterrows():
@@ -657,7 +660,8 @@ def main():
                   "sheet_run": sheet_run, "bankroll": args.bankroll, "kelly": scfg.kelly_mode, "edge_margin": args.margin, "edge_metric": "ev", "max_odds": args.max_odds, "ep_scale": [vcfg.early_payout_scale, vcfg.early_payout_scale_favourite],
                   "n_settled": int(rep.get("n_settled", 0)),
                   "price_reference": "Betfair Exchange fair price (football-data.co.uk), early payout from the measured curve" if curve is not None else "model pooled with bet365",
-                  "ep_curve": curve.describe() if curve is not None else "", "data_warning": data_warning,
+                  "ep_curve": curve.describe() if curve is not None else "", "ep_curve_params": curve.as_dict() if curve is not None else None,
+                  "data_warning": data_warning,
                   "sheet_bets": int(len(sheet)) if args.mode in ("sheet", "both") else 0,
                   "fun_pot": args.fun_pot, "fun_legs": args.fun_legs, "core_multis": args.core_multis == "yes", "multi_max_leg": args.multi_max_leg, "slips": slip_rec,
                   "clv_n": test["n"], "clv_mean": test["mean"], "clv_lower95": test["lower95"], "clv_share_positive": test["share_positive"], "clv_verdict": test["verdict"]}
@@ -671,7 +675,7 @@ def main():
                    "match": f"{r['home']} – {r['away']}", "home": r["home"], "away": r["away"], "priced": bool(r.get("priced")), "pick": r.get("pick") or ""}
             if r.get("priced"):
                 for s, key in (("home", "H"), ("draw", "D"), ("away", "A")):
-                    row[key] = {"p": r[f"p_{s}"], "fair": r[f"fair_{s}"], "min_b365": r[f"min_b365_{s}"], "b365": r[f"b365_{s}"], "min_other": r[f"min_other_{s}"],
+                    row[key] = {"p": r[f"p_{s}"], "z": r.get(f"z_{s}", 0.0), "fair": r[f"fair_{s}"], "min_b365": r[f"min_b365_{s}"], "b365": r[f"b365_{s}"], "min_other": r[f"min_other_{s}"],
                               "best": r[f"max_{s}"], "offers": r[f"offers_{s}"], "ep": r[f"ep_{s}"]}
             else:
                 row["note"] = r.get("note", "")

@@ -33,4 +33,4 @@ jobs:
           git config user.name "footquant fetch"
           git config user.email "fetch@footquant.local"
           git add data
-          if git diff --cached --quiet; then echo "no changes"; else git commit -m "data $(date -u +'%Y-%m-%d %H:%M')" && git push; fi
+          if git diff --cached --quiet; then echo "no changes"; else git commit -m "data $(date -u +'%Y-%m-%d %H:%M')" && git pull --rebase && git push; fi
