@@ -673,8 +673,53 @@
    "away": "Tottenham",
    "kickoff_utc": "2026-10-24T16:30:00Z",
    "lineups": {
-    "confirmed": false,
-    "note": "line-ups not published yet"
+    "confirmed": true,
+    "taken_utc": "2026-10-24T15:32:41Z",
+    "home": {
+     "formation": "3-4-2-1",
+     "starters": [
+      "Mike Penders",
+      "Levi Colwill",
+      "Maxence Lacroix",
+      "Josh Acheampong",
+      "Cole Palmer",
+      "Pedro Neto",
+      "Moisés Caicedo",
+      "Jordan Henderson",
+      "Geovany Quenda",
+      "Jorrel Hato",
+      "Morgan Rogers"
+     ],
+     "changes": 2,
+     "regulars_out": [
+      "Emiliano Martínez",
+      "João Pedro",
+      "Pep Chavarría"
+     ],
+     "matches_compared": 3
+    },
+    "away": {
+     "formation": "4-2-3-1",
+     "starters": [
+      "Antonín Kinsky",
+      "Andy Robertson",
+      "Jan Paul van Hecke",
+      "Micky van de Ven",
+      "Archie Gray",
+      "Sandro Tonali",
+      "Mathys Tel",
+      "Mateus Fernandes",
+      "Mohammed Kudus",
+      "James Maddison",
+      "Omar Marmoush"
+     ],
+     "changes": 2,
+     "regulars_out": [
+      "Dominic Solanke",
+      "Sávio"
+     ],
+     "matches_compared": 3
+    }
    }
   },
   "ESP-La Liga|2026-27|2026-10-24|Valencia|Villarreal": {
@@ -689,7 +734,7 @@
   }
  },
  "last_call": {},
- "updated_utc": "2026-10-24T15:27:37Z",
+ "updated_utc": "2026-10-24T15:32:41Z",
  "credits_left": null,
  "odds_error": {
   "code": 401,

@@ -15,3 +15,4 @@
 2026-10-24T13:11:19Z  FAILED    prices soccer_germany_bundesliga: The Odds API rejected the key (HTTP 401); replace the ODDS_KEY secret
 2026-10-24T13:26:29Z  line-ups  Santander - Espanol: changes 1/2, regulars out André Almeida / Clemens Riedel, Roger Hinojo
 2026-10-24T15:17:29Z  line-ups  Napoli - Roma: changes 7/5, regulars out Amir Rrahmani, Billy Gilmour, Leonardo Spinazzola, Stanislav Lobotka / Leonardo Balerdi, Manu Koné, Nahuel Molina, Paulo Dybala
+2026-10-24T15:32:41Z  line-ups  Chelsea - Tottenham: changes 2/2, regulars out Emiliano Martínez, João Pedro, Pep Chavarría / Dominic Solanke, Sávio
