@@ -598,10 +598,20 @@
      "matches_compared": 3
     }
    }
+  },
+  "ITA-Serie A|2026-27|2026-10-24|Napoli|Roma": {
+   "div": "I1",
+   "home": "Napoli",
+   "away": "Roma",
+   "kickoff_utc": "2026-10-24T16:00:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
   }
  },
  "last_call": {},
- "updated_utc": "2026-10-24T13:26:29Z",
+ "updated_utc": "2026-10-24T14:42:05Z",
  "credits_left": null,
  "odds_error": {
   "code": 401,
