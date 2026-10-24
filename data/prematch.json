@@ -6,8 +6,51 @@
    "away": "Bologna",
    "kickoff_utc": "2026-10-24T13:00:00Z",
    "lineups": {
-    "confirmed": false,
-    "note": "line-ups not published yet"
+    "confirmed": true,
+    "taken_utc": "2026-10-24T12:22:07Z",
+    "home": {
+     "formation": "4-3-2-1",
+     "starters": [
+      "Elia Caprile",
+      "Adam Obert",
+      "Juan Rodríguez",
+      "Alessandro Deiola",
+      "Zé Pedro",
+      "Harry Winks",
+      "Paul Mendy",
+      "Yanis Massolin",
+      "Daniel Maldini",
+      "Michel Adopo",
+      "Alessandro Romano"
+     ],
+     "changes": 2,
+     "regulars_out": [
+      "Yerry Mina"
+     ],
+     "matches_compared": 3
+    },
+    "away": {
+     "formation": "3-4-3",
+     "starters": [
+      "Lukasz Skorupski",
+      "Arthur Theate",
+      "Nicolo Casale",
+      "Matteo Darmian",
+      "Nadir Zortea",
+      "Lewis Ferguson",
+      "Juan Miranda",
+      "Tommaso Pobega",
+      "Nicolò Cambiaghi",
+      "Jens Odgaard",
+      "Federico Bernardeschi"
+     ],
+     "changes": 1,
+     "regulars_out": [
+      "Roberto Piccoli",
+      "Torbjørn Heggem"
+     ],
+     "matches_compared": 3
+    }
    }
   },
   "ITA-Serie A|2026-27|2026-10-24|Como|Sassuolo": {
@@ -16,8 +59,60 @@
    "away": "Sassuolo",
    "kickoff_utc": "2026-10-24T13:00:00Z",
    "lineups": {
-    "confirmed": false,
-    "note": "line-ups not published yet"
+    "confirmed": true,
+    "taken_utc": "2026-10-24T12:22:07Z",
+    "home": {
+     "formation": "4-2-3-1",
+     "starters": [
+      "Samuele Ricci",
+      "Jean Butez",
+      "Martin Baturina",
+      "Máximo Perrone",
+      "Anastasios Douvikas",
+      "Yan Couto",
+      "Maxence Caqueret",
+      "Lucas Da Cunha",
+      "Marc-Oliver Kempf",
+      "Kaiki",
+      "Willy Kambwala"
+     ],
+     "changes": 6,
+     "regulars_out": [
+      "Assane Diao",
+      "Jacobo Ramón",
+      "Luis Milla",
+      "Nico Paz",
+      "Trevoh Chalobah",
+      "Álex Valle"
+     ],
+     "matches_compared": 3
+    },
+    "away": {
+     "formation": "4-2-3-1",
+     "starters": [
+      "Stefano Turati",
+      "Rafael Obrador",
+      "Fali Candé",
+      "Duje Caleta-Car",
+      "Ignace van der Brempt",
+      "Darryl Bakola",
+      "Vasilije Adzic",
+      "Nemanja Matic",
+      "Domenico Berardi",
+      "Benjamín Domínguez",
+      "Kieron Bowie"
+     ],
+     "changes": 6,
+     "regulars_out": [
+      "Arijanet Muric",
+      "Armand Laurienté",
+      "Fedde Leysen",
+      "Josh Doig",
+      "Kristian Thorstvedt",
+      "Sebastiano Esposito"
+     ],
+     "matches_compared": 3
+    }
    }
   },
   "ESP-La Liga|2026-27|2026-10-24|Vallecano|Elche": {
@@ -69,9 +164,61 @@
      "matches_compared": 3
     }
    }
+  },
+  "GER-Bundesliga|2026-27|2026-10-24|Augsburg|Union Berlin": {
+   "div": "D1",
+   "home": "Augsburg",
+   "away": "Union Berlin",
+   "kickoff_utc": "2026-10-24T13:30:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
+  },
+  "GER-Bundesliga|2026-27|2026-10-24|FC Koln|Schalke 04": {
+   "div": "D1",
+   "home": "FC Koln",
+   "away": "Schalke 04",
+   "kickoff_utc": "2026-10-24T13:30:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
+  },
+  "GER-Bundesliga|2026-27|2026-10-24|Mainz|Werder Bremen": {
+   "div": "D1",
+   "home": "Mainz",
+   "away": "Werder Bremen",
+   "kickoff_utc": "2026-10-24T13:30:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
+  },
+  "GER-Bundesliga|2026-27|2026-10-24|Paderborn|Hamburg": {
+   "div": "D1",
+   "home": "Paderborn",
+   "away": "Hamburg",
+   "kickoff_utc": "2026-10-24T13:30:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
+  },
+  "GER-Bundesliga|2026-27|2026-10-24|RB Leipzig|Elversberg": {
+   "div": "D1",
+   "home": "RB Leipzig",
+   "away": "Elversberg",
+   "kickoff_utc": "2026-10-24T13:30:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
   }
  },
- "last_call": {},
- "updated_utc": "2026-10-24T11:51:09Z",
+ "last_call": {
+  "I1": "2026-10-24T12:22:07Z"
+ },
+ "updated_utc": "2026-10-24T12:22:07Z",
  "credits_left": null
 }
