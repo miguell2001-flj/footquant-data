@@ -41,7 +41,7 @@ from two goals down ((came back + 1) / (trailed by two + 10), from earlier match
 Desk can re-price with the same curve. Goal-minute study: odds ratio about 1.3 per standard deviation; a team's own
 scoring timing showed no effect. `tests/test_comeback.py` checks it.
 
-**Pre-kick-off check (since 24 Oct 2026)**: the workflow `prematch.yml` runs `prematch.py` every 15 minutes. For big-5
+**Pre-kick-off check (since 24 Oct 2026)**: the workflow `prematch.yml` keeps one run alive while big-5 matches are within 6 hours and runs `prematch.py` every 5 minutes (GitHub's 15-minute schedule only restarts that loop; it fires late under load). For big-5
 matches starting within 80 minutes it writes `data/prematch.json` (keyed by the model's `match_id`): the confirmed
 line-ups from ESPN (changes since the last match, regulars out) and one Betfair Exchange + Pinnacle snapshot per league
 taken 15-55 minutes before kick-off (The Odds API, about 1 credit a call, never below 40 credits left). The Desk's

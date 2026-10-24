@@ -1,8 +1,11 @@
 name: pre-kick-off prices and line-ups
 
+# One run stays alive while big-5 matches are coming up and runs prematch.py every 5 minutes (GitHub's own schedule
+# fires late or skips under load, which is too coarse for a kick-off check). The schedule below only (re)starts that
+# loop; a run that finds nothing within 6 hours exits at once. Public repository: Actions minutes cost nothing.
 on:
   schedule:
-    - cron: "*/15 * * * *"  # every 15 minutes; exits at once when no big-5 match starts within 80 minutes
+    - cron: "*/15 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -12,29 +15,18 @@ permissions:
   contents: write
 
 concurrency:
-  group: fetch            # shares the queue with the daily fetch, so the two never push at the same time
+  group: prematch          # one loop at a time; a run triggered meanwhile waits and takes over when the loop ends
   cancel-in-progress: false
 
 jobs:
   prematch:
     runs-on: ubuntu-latest
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
-      - name: anything due?
+      - name: anything in the next 6 hours?
         id: due
-        run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import csv, datetime as dt
-          from zoneinfo import ZoneInfo
-          now = dt.datetime.now(dt.timezone.utc); due = 0
-          for r in csv.DictReader(open("data/fixtures.csv", encoding="utf-8-sig")):
-              if r.get("Div") in ("E0", "SP1", "I1", "D1", "F1") and r.get("Date"):
-                  d = dt.datetime.strptime(r["Date"].strip(), "%d/%m/%Y")
-                  hh, mm = (r.get("Time") or "15:00").split(":")[:2]
-                  ko = d.replace(hour=int(hh), minute=int(mm), tzinfo=ZoneInfo("Europe/London")).astimezone(dt.timezone.utc)
-                  due += now < ko <= now + dt.timedelta(minutes=80)
-          print(f"due={due}")
-          PY
+        run: echo "due=$(python3 prematch_due.py 360)" >> "$GITHUB_OUTPUT"
       - if: steps.due.outputs.due != '0'
         uses: actions/setup-python@v5
         with:
@@ -42,13 +34,21 @@ jobs:
       - if: steps.due.outputs.due != '0'
         run: pip install requests pandas numpy scipy scikit-learn
       - if: steps.due.outputs.due != '0'
-        run: python prematch.py
+        name: loop until the last kick-off (at most 5 h 40)
         env:
           ODDS_KEY: ${{ secrets.ODDS_KEY }}
-      - if: steps.due.outputs.due != '0'
-        name: commit
         run: |
           git config user.name "footquant prematch"
           git config user.email "prematch@footquant.local"
-          git add data/prematch.json data/lineups_cache.json data/prematch.log 2>/dev/null || true
-          if git diff --cached --quiet; then echo "no changes"; else git commit -m "prematch $(date -u +'%Y-%m-%d %H:%M')" && git pull --rebase && git push; fi
+          end=$((SECONDS + 20400))
+          while [ $SECONDS -lt $end ]; do
+            git pull -q --rebase || true
+            python prematch.py || echo "prematch.py failed"
+            for f in data/prematch.json data/lineups_cache.json data/prematch.log; do if [ -f "$f" ]; then git add "$f"; fi; done
+            if ! git diff --cached --quiet; then
+              git commit -q -m "prematch $(date -u +'%Y-%m-%d %H:%M')"
+              for i in 1 2 3; do git pull -q --rebase && git push -q && break; sleep 5; done
+            fi
+            [ "$(python3 prematch_due.py 360)" = "0" ] && { echo "no big-5 kick-off in the next 6 hours"; break; }
+            sleep 300
+          done
