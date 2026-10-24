@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: "3.12"
       - if: steps.due.outputs.due != '0'
-        run: pip install requests pandas numpy scipy
+        run: pip install requests pandas numpy scipy scikit-learn
       - if: steps.due.outputs.due != '0'
         run: python prematch.py
         env:
