@@ -13,6 +13,7 @@ finished matches, so each is fetched once). Usage: python prematch.py [--now 202
 from __future__ import annotations
 
 import csv
+import hashlib
 import datetime as dt
 import json
 import os
@@ -61,6 +62,10 @@ def odds_get(sport: str, key: str, now: dt.datetime):
             log(f"FAILED    prices {sport}: {type(e).__name__}", now)
             return None
         if r.ok:
+            return r
+        if r.status_code == 401:
+            r.ok_key = False
+            log(f"FAILED    prices {sport}: The Odds API rejected the key (HTTP 401); replace the ODDS_KEY secret", now)
             return r
         log(f"FAILED    prices {sport} ({'bookmakers' if 'bookmakers' in extra else 'regions'}): HTTP {r.status_code} {r.text[:160]!r}", now)
         if r.status_code not in (400, 422):
@@ -211,6 +216,10 @@ def main() -> int:
                       and not ((state["matches"].get(f["match_id"]) or {}).get("exchange") or {}).get("taken_utc", "") >= (f["ko"] - dt.timedelta(minutes=ODDS_FROM_MIN + 5)).strftime("%Y-%m-%dT%H:%M:%SZ")})
     credits = state.get("credits_left")
     last_call = state.setdefault("last_call", {})
+    err = state.get("odds_error") or {}
+    key_id = hashlib.sha256(key.encode()).hexdigest()[:10] if key else ""  # tells a replaced secret apart, reveals nothing
+    if err and err.get("key_id") == key_id and err.get("at", "") > (now - dt.timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%SZ"):
+        leagues = []  # this same key was rejected: no calls until the secret is replaced (or six hours pass)
     for div in leagues:
         if last_call.get(div, "") > (now - dt.timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ"):
             continue  # at most one call per league every 30 minutes, even if a fixture could not be matched
@@ -221,9 +230,14 @@ def main() -> int:
             log(f"skip      prices ({credits} credits left, keeping {MIN_CREDITS} in reserve)", now)
             break
         r = odds_get(SPORT[div], key, now)
+        if r is not None and getattr(r, "ok_key", True) is False:
+            state["odds_error"] = {"code": 401, "message": "The Odds API rejected the key", "at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "key_id": key_id}
+            changed = True
+            break
         if r is None:
             changed = True  # keep the failure in the log
             continue
+        state.pop("odds_error", None)
         last_call[div] = now.strftime("%Y-%m-%dT%H:%M:%SZ")  # failed calls cost no credits, so only a success starts the 30-minute wait
         credits = r.headers.get("x-requests-remaining", credits)
         cands = {_norm(n): n for f in fx if f["div"] == div for n in (f["home"], f["away"])}
