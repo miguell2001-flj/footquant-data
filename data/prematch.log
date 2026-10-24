@@ -2,3 +2,9 @@
 2026-10-24T12:22:07Z  line-ups  Cagliari - Bologna: changes 2/1, regulars out Yerry Mina / Roberto Piccoli, Torbjørn Heggem
 2026-10-24T12:22:07Z  line-ups  Como - Sassuolo: changes 6/6, regulars out Assane Diao, Jacobo Ramón, Luis Milla, Nico Paz, Trevoh Chalobah, Álex Valle / Arijanet Muric, Armand Laurienté, Fedde Leysen, Josh Doig, Kristian Thorstvedt, Sebastiano Esposito
 2026-10-24T12:22:07Z  FAILED    prices I1
+2026-10-24T13:01:00Z  line-ups  Augsburg - Union Berlin: changes 2/1, regulars out Robin Fellhauer, Rodrigo Ribeiro / Kastriot Imeri
+2026-10-24T13:01:00Z  line-ups  FC Koln - Schalke 04: changes 1/3, regulars out Ellyes Skhiri / Adrian Gantenbein, Edin Dzeko, Kenan Karaman
+2026-10-24T13:01:00Z  line-ups  Mainz - Werder Bremen: changes 0/1, regulars out Fabio Gruber / Eren Dinkci
+2026-10-24T13:01:00Z  line-ups  Paderborn - Hamburg: changes 0/2, regulars out Marvin Pieringer / Albert Sambi Lokonga, Louis Lemke, Nicolai Remberg, Nicolás Capaldo
+2026-10-24T13:01:00Z  line-ups  RB Leipzig - Elversberg: changes 6/1, regulars out Brajan Gruda, Castello Lukeba, Christopher Nkunku, David Raum, Maarten Vandevoordt, Ridle Baku, Rômulo / Noah Darvich
+2026-10-24T13:01:00Z  FAILED    prices soccer_germany_bundesliga (bookmakers): HTTP 401 '{"message":"API key is not valid. Get an API key at https://the-odds-api.com","error_code":"INVALID_KEY","details_url":"https://the-odds-api.com/liveapi/guides/'
