@@ -824,10 +824,30 @@
      "matches_compared": 3
     }
    }
+  },
+  "FRA-Ligue 1|2026-27|2026-10-24|Lens|Paris FC": {
+   "div": "F1",
+   "home": "Lens",
+   "away": "Paris FC",
+   "kickoff_utc": "2026-10-24T18:45:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
+  },
+  "ITA-Serie A|2026-27|2026-10-24|Lazio|Parma": {
+   "div": "I1",
+   "home": "Lazio",
+   "away": "Parma",
+   "kickoff_utc": "2026-10-24T18:45:00Z",
+   "lineups": {
+    "confirmed": false,
+    "note": "line-ups not published yet"
+   }
   }
  },
  "last_call": {},
- "updated_utc": "2026-10-24T15:47:52Z",
+ "updated_utc": "2026-10-24T17:28:33Z",
  "credits_left": null,
  "odds_error": {
   "code": 401,
