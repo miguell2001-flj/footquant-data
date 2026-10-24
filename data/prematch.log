@@ -13,3 +13,4 @@
 2026-10-24T13:06:14Z  FAILED    prices soccer_germany_bundesliga (bookmakers): HTTP 401 '{"message":"API key is not valid. Get an API key at https://the-odds-api.com","error_code":"INVALID_KEY","details_url":"https://the-odds-api.com/liveapi/guides/'
 2026-10-24T13:06:14Z  FAILED    prices soccer_epl (bookmakers): HTTP 401 '{"message":"API key is not valid. Get an API key at https://the-odds-api.com","error_code":"INVALID_KEY","details_url":"https://the-odds-api.com/liveapi/guides/'
 2026-10-24T13:11:19Z  FAILED    prices soccer_germany_bundesliga: The Odds API rejected the key (HTTP 401); replace the ODDS_KEY secret
+2026-10-24T13:26:29Z  line-ups  Santander - Espanol: changes 1/2, regulars out André Almeida / Clemens Riedel, Roger Hinojo
